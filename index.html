@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v9.2 (Final Estable)</title>
+    <title>Gestión de Legajos v10.0 (Estable)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -104,6 +104,7 @@
     function GestorDeLegajos({ user, onSignOut }) {
         const [legajos, setLegajos] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
+        const [isCreating, setIsCreating] = React.useState(false);
         const [q, setQ] = React.useState("");
         const [current, setCurrent] = React.useState(null);
         const [showNew, setShowNew] = React.useState(false);
@@ -139,11 +140,11 @@
             const csvRows = [];
             filteredLegajos.forEach(legajo => {
                 csvRows.push(["LEGAJO:", legajo.numero, legajo.caratula, `(Estado: ${isOverdue(legajo) ? "Vencido" : legajo.enTransito ? "En Tránsito" : "En Juzgado"})`].map(csvEscape).join(','));
-                csvRows.push(["", "Fecha del Movimiento", "Tipo", "Detalle"].map(csvEscape).join(','));
+                csvRows.push(["", "Fecha del Movimiento", "Tipo", "Detalle", "Usuario"].map(csvEscape).join(','));
                 if (legajo.historial && legajo.historial.length > 0) {
                     const sortedHistory = [...legajo.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0));
                     sortedHistory.forEach(mov => {
-                        csvRows.push(["", fmtDateTime(mov.fecha), mov.tipo, mov.notas].map(csvEscape).join(','));
+                        csvRows.push(["", fmtDateTime(mov.fecha), mov.tipo, mov.notas, mov.usuario || ""].map(csvEscape).join(','));
                     });
                 } else {
                      csvRows.push(["", "Sin movimientos registrados."].map(csvEscape).join(','));
@@ -165,11 +166,23 @@
         async function crearLegajo() {
             if (!validateNumeroExpediente(newForm.numero)) { alert("Formato de N° inválido."); return; }
             if (!newForm.caratula.trim()) { alert("La carátula es obligatoria."); return; }
-            if (!confirm("¿Estás seguro de que deseas guardar los datos?")) { return; }
+            
+            setIsCreating(true);
             try {
-                const nuevoHistorial = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado en el sistema.' };
+                const numeroNormalizado = newForm.numero.trim();
+                const snapshot = await legajosCollectionRef.where("numero", "==", numeroNormalizado).get();
+                if (!snapshot.empty) {
+                    alert("Este número de legajo ya existe en la base de datos.");
+                    setIsCreating(false);
+                    return;
+                }
+                if (!confirm("¿Estás seguro de que deseas guardar los datos?")) {
+                    setIsCreating(false);
+                    return;
+                }
+                const nuevoHistorial = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado en el sistema.', usuario: user.email };
                 await legajosCollectionRef.add({
-                    numero: newForm.numero.trim(),
+                    numero: numeroNormalizado,
                     caratula: newForm.caratula.trim(),
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                     enTransito: false,
@@ -182,6 +195,8 @@
             } catch (error) {
                 console.error("Error al crear el legajo: ", error);
                 alert("No se pudo crear el legajo.");
+            } finally {
+                setIsCreating(false);
             }
         }
         async function editarLegajo() {
@@ -192,7 +207,7 @@
                 const legajoDocRef = legajosCollectionRef.doc(editForm.id);
                 const docSnap = await legajoDocRef.get();
                 const legajoActual = docSnap.data();
-                const nuevoHistorial = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados.` };
+                const nuevoHistorial = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados.`, usuario: user.email };
                 const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
                 await legajoDocRef.update({
                     numero: editForm.numero.trim(),
@@ -210,7 +225,7 @@
                 const legajoDocRef = legajosCollectionRef.doc(legajoId);
                 const docSnap = await legajoDocRef.get();
                 const legajoActual = docSnap.data();
-                const nuevoHistorial = { id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.' };
+                const nuevoHistorial = { id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email };
                 const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
                 await legajoDocRef.update({
                     enTransito: false,
@@ -233,7 +248,7 @@
                 const legajoActual = docSnap.data();
                 const now = new Date();
                 const venc = salidaForm.plazoDias ? addDays(now, salidaForm.plazoDias) : null;
-                const nuevoHistorial = { id: uid(), tipo: 'SALIDA', fecha: new Date(), notas: `Enviado a ${dependenciaFinal}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc };
+                const nuevoHistorial = { id: uid(), tipo: 'SALIDA', fecha: new Date(), notas: `Enviado a ${dependenciaFinal}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc, usuario: user.email };
                 const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
                 await legajoDocRef.update({
                     enTransito: true,
@@ -297,27 +312,27 @@
                     </main>
                 </div>
                 {/* Modales */}
-                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={crearLegajo}>Confirmar y Crear</button></>}>
+                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:bg-blue-300" onClick={crearLegajo} disabled={isCreating}>{isCreating ? 'Verificando...' : 'Confirmar y Crear'}</button></>}>
                     <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                     <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={newForm.caratula} onChange={(e) => setNewForm({...newForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowEdit(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={editarLegajo}>Guardar Cambios</button></>}>
+                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button onClick={() => setShowEdit(false)}>Cancelar</button><button onClick={editarLegajo}>Guardar Cambios</button></>}>
                     <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={editForm.numero} onChange={(e) => setEditForm({...editForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                     <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={editForm.caratula} onChange={(e) => setEditForm({...editForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowSalida(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={registrarSalida}>Registrar Salida</button></>}>
+                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button onClick={() => setShowSalida(false)}>Cancelar</button><button onClick={registrarSalida}>Registrar Salida</button></>}>
                     <div><label className="font-semibold text-gray-800">Dependencia</label><select value={salidaForm.dependencia} onChange={(e) => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1">{DEPENDENCIAS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
                     {salidaForm.dependencia === 'Otra' && <div className="mt-4"><label className="font-semibold text-gray-800">Especifique otra dependencia</label><input value={salidaForm.otraDependencia} onChange={(e) => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>}
                     <div className="mt-4"><label className="font-semibold text-gray-800">Plazo de devolución (días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={(e) => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button className="px-3 py-2 bg-gray-200 rounded" onClick={() => setShowHist(false)}>Cerrar</button></>}>
+                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button onClick={() => setShowHist(false)}>Cerrar</button></>}>
                     {current?.historial && current.historial.length > 0 ? (
                         <ul className="space-y-3">
                             {[...current.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0)).map(mov => (
                                 <li key={mov.id} className="text-sm border-b pb-2 last:border-b-0">
                                     <div className="flex justify-between items-center"><span className="font-semibold">{mov.tipo}</span><span className="text-xs">{fmtDateTime(mov.fecha)}</span></div>
                                     <p className="mt-1">{mov.notas}</p>
-                                    {mov.plazo > 0 && <p className="text-xs">Plazo: {mov.plazo} días. Vence: {fmtDateTime(mov.vencimiento)}</p>}
+                                    {mov.usuario && <p className="text-xs text-gray-500 mt-1">Realizado por: {mov.usuario}</p>}
                                 </li>
                             ))}
                         </ul>
@@ -356,18 +371,10 @@
                 <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-sm">
                     <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">Sistema de Gestión de Legajos</h2>
                     <form onSubmit={handleLogin}>
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700">Correo Electrónico</label>
-                            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 p-2 border rounded w-full" required />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-gray-700">Contraseña</label>
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 p-2 border rounded w-full" required />
-                        </div>
+                        <div className="mb-4"><label className="block text-sm font-medium text-gray-700">Correo Electrónico</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 p-2 border rounded w-full" required /></div>
+                        <div className="mb-6"><label className="block text-sm font-medium text-gray-700">Contraseña</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 p-2 border rounded w-full" required /></div>
                         {error && <p className="text-red-500 text-sm text-center mb-4">{error}</p>}
-                        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:bg-blue-300">
-                            {loading ? 'Accediendo...' : 'Acceder'}
-                        </button>
+                        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:bg-blue-300">{loading ? 'Accediendo...' : 'Acceder'}</button>
                     </form>
                 </div>
             </div>
