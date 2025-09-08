@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v9.0 (Final)</title>
+    <title>Gestión de Legajos v9.2 (Final Estable)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -89,10 +89,10 @@
         if (!open) return null;
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white shadow-2xl border border-gray-200">
-                    <div className="px-5 py-4 border-b"><h3 className="text-lg font-semibold">{title}</h3></div>
-                    <div className="p-5 bg-gray-50/50 max-h-[60vh] overflow-y-auto">{children}</div>
-                    <div className="px-5 py-4 border-t flex justify-end gap-2">{footer}</div>
+                <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white/80 backdrop-blur-lg shadow-2xl border border-white/30">
+                    <div className="px-5 py-4 border-b border-white/30"><h3 className="text-lg font-semibold text-gray-900">{title}</h3></div>
+                    <div className="p-5 bg-white/50 max-h-[60vh] overflow-y-auto">{children}</div>
+                    <div className="px-5 py-4 border-t border-white/30 flex justify-end gap-2">{footer}</div>
                 </div>
             </div>
         );
@@ -131,7 +131,37 @@
             return legajos.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term));
         }, [legajos, q]);
         
-        function exportCSV() { /* ... Lógica de exportación sin cambios ... */ }
+        function exportCSV() {
+            if (filteredLegajos.length === 0) {
+                alert("No hay datos para exportar.");
+                return;
+            }
+            const csvRows = [];
+            filteredLegajos.forEach(legajo => {
+                csvRows.push(["LEGAJO:", legajo.numero, legajo.caratula, `(Estado: ${isOverdue(legajo) ? "Vencido" : legajo.enTransito ? "En Tránsito" : "En Juzgado"})`].map(csvEscape).join(','));
+                csvRows.push(["", "Fecha del Movimiento", "Tipo", "Detalle"].map(csvEscape).join(','));
+                if (legajo.historial && legajo.historial.length > 0) {
+                    const sortedHistory = [...legajo.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0));
+                    sortedHistory.forEach(mov => {
+                        csvRows.push(["", fmtDateTime(mov.fecha), mov.tipo, mov.notas].map(csvEscape).join(','));
+                    });
+                } else {
+                     csvRows.push(["", "Sin movimientos registrados."].map(csvEscape).join(','));
+                }
+                csvRows.push([]);
+            });
+            const csvContent = csvRows.join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            const today = new Date().toISOString().slice(0, 10);
+            link.setAttribute("download", `reporte_legajos_${today}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
         async function crearLegajo() {
             if (!validateNumeroExpediente(newForm.numero)) { alert("Formato de N° inválido."); return; }
             if (!newForm.caratula.trim()) { alert("La carátula es obligatoria."); return; }
@@ -233,13 +263,13 @@
                 <div className="relative z-10 min-h-screen">
                     <header className="bg-white/70 backdrop-blur-sm border-b border-white/30 p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div>
-                            <h1 className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent drop-shadow-lg bg-gradient-to-b from-gray-700 to-gray-900">Gestión de Legajos</h1>
+                            <h1 className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent drop-shadow-lg bg-gradient-to-b from-gray-700 to-gray-900">Gestión de Legajos EESS - JUZGADO DE EJECUCION PENAL N° 2</h1>
                             <p className="text-xs text-gray-600">Sesión iniciada: {user.email}</p>
                         </div>
                         <div className="flex items-center gap-4">
                             <button className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition" onClick={exportCSV}>⬇️ Exportar</button>
                             <button className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition" onClick={() => setShowNew(true)}>➕ Nuevo Legajo</button>
-                            <button className="text-sm text-gray-600 hover:text-red-600" onClick={onSignOut}>Cerrar Sesión</button>
+                            <button className="text-sm font-bold text-gray-700 hover:text-red-600" onClick={onSignOut}>Cerrar Sesión</button>
                         </div>
                     </header>
                     <main className="max-w-7xl mx-auto px-4 py-6">
@@ -267,20 +297,20 @@
                     </main>
                 </div>
                 {/* Modales */}
-                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button onClick={() => setShowNew(false)}>Cancelar</button><button onClick={crearLegajo}>Confirmar y Crear</button></>}>
-                    <div><label>Legajo N°</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label>Carátula</label><input value={newForm.caratula} onChange={(e) => setNewForm({...newForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={crearLegajo}>Confirmar y Crear</button></>}>
+                    <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                    <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={newForm.caratula} onChange={(e) => setNewForm({...newForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button onClick={() => setShowEdit(false)}>Cancelar</button><button onClick={editarLegajo}>Guardar Cambios</button></>}>
-                    <div><label>Legajo N°</label><input value={editForm.numero} onChange={(e) => setEditForm({...editForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label>Carátula</label><input value={editForm.caratula} onChange={(e) => setEditForm({...editForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowEdit(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={editarLegajo}>Guardar Cambios</button></>}>
+                    <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={editForm.numero} onChange={(e) => setEditForm({...editForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                    <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={editForm.caratula} onChange={(e) => setEditForm({...editForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button onClick={() => setShowSalida(false)}>Cancelar</button><button onClick={registrarSalida}>Registrar Salida</button></>}>
-                    <div><label>Dependencia</label><select value={salidaForm.dependencia} onChange={(e) => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1">{DEPENDENCIAS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                    {salidaForm.dependencia === 'Otra' && <div className="mt-4"><label>Especifique otra dependencia</label><input value={salidaForm.otraDependencia} onChange={(e) => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>}
-                    <div className="mt-4"><label>Plazo de devolución (días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={(e) => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition" onClick={() => setShowSalida(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow transition" onClick={registrarSalida}>Registrar Salida</button></>}>
+                    <div><label className="font-semibold text-gray-800">Dependencia</label><select value={salidaForm.dependencia} onChange={(e) => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1">{DEPENDENCIAS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                    {salidaForm.dependencia === 'Otra' && <div className="mt-4"><label className="font-semibold text-gray-800">Especifique otra dependencia</label><input value={salidaForm.otraDependencia} onChange={(e) => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>}
+                    <div className="mt-4"><label className="font-semibold text-gray-800">Plazo de devolución (días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={(e) => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button onClick={() => setShowHist(false)}>Cerrar</button></>}>
+                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button className="px-3 py-2 bg-gray-200 rounded" onClick={() => setShowHist(false)}>Cerrar</button></>}>
                     {current?.historial && current.historial.length > 0 ? (
                         <ul className="space-y-3">
                             {[...current.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0)).map(mov => (
