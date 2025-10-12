@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v10.0 (Estable)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <title>Gestión de Legajos v18.1 (Manejo de Errores Mejorado)</title>
+    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    
+    <!-- React & Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <style>
         @keyframes move-gradient {
             0% { background-position: 0% 50%; }
@@ -21,11 +25,12 @@
             background: linear-gradient(-45deg, #1b263b, #415a77, #778da9, #0d1b2a);
             background-size: 400% 400%;
             animation: move-gradient 20s ease infinite;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        }
+        .barcode-active-indicator { transition: all 0.3s ease; }
+        .barcode-scanned {
+            box-shadow: 0 0 15px 5px rgba(59, 130, 246, 0.6) !important;
+            transform: scale(1.02);
         }
     </style>
 </head>
@@ -37,24 +42,35 @@
     // =======================================================
     //  INICIALIZACIÓN DE FIREBASE
     // =======================================================
+    // ▼▼▼ PEGA AQUÍ LA CONFIGURACIÓN DE TU PROYECTO DE FIREBASE ▼▼▼
     const firebaseConfig = {
-        apiKey: "AIzaSyDCCruZk6UAf2ybjJG6gihuUrJMZduhUI0",
-        authDomain: "gestor-legajos-eess.firebaseapp.com",
-        projectId: "gestor-legajos-eess",
-        storageBucket: "gestor-legajos-eess.appspot.com",
-        messagingSenderId: "599295230532",
-        appId: "1:599295230532:web:bd18f19ce6317d56987211"
+      apiKey: "AIzaSyDCCruZk6UAf2ybjJG6gihuUrJMZduhUI0",
+      authDomain: "gestor-legajos-eess.firebaseapp.com",
+      projectId: "gestor-legajos-eess",
+      storageBucket: "gestor-legajos-eess.firebasestorage.app",
+      messagingSenderId: "599295230532",
+      appId: "1:599295230532:web:bd18f19ce6317d56987211"
     };
+    // ▲▲▲ FIN DE LA SECCIÓN DE CONFIGURACIÓN ▲▲▲
 
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const auth = firebase.auth();
+    let db, auth;
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+    } catch (e) {
+        console.error("Error al inicializar Firebase. ¿Están las credenciales correctas?", e);
+        document.body.innerHTML = `<div style="padding:2rem;text-align:center;font-family:sans-serif;background-color:#fff3f3;color:#b91c1c;"><h1>Error de Configuración de Firebase</h1><p>No se pudo conectar a la base de datos. Por favor, verifica que las credenciales en la variable <strong>firebaseConfig</strong> sean correctas.</p></div>`;
+    }
+
     const legajosCollectionRef = db.collection("legajos");
+    const deletedCollectionRef = db.collection("legajos_eliminados");
 
     // =======================================================
     //  UTILS & UI COMPONENTS
     // =======================================================
-    const DEPENDENCIAS = ["Fiscalía", "Defensoría", "Gabinete Técnico de Ejecución", "Corte de Justicia", "Otra"];
+    const DEPENDENCIAS = ["Fiscalía Correccional N° 1", "Fiscalía Correccional N° 2", "Fiscalía Correccional N° 3","Defensoría N° 1", "Defensoría N° 2", "Defensoría N° 3", "Defensoría N° 4", "Defensoría N° 5", "Defensoría N° 6","Gabinete Técnico de Ejecución", "Corte de Justicia", "Otra"];
+
     function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
     function fmtDateTime(d) {
         if (!d) return "—";
@@ -62,214 +78,201 @@
             try { return d.toDate().toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" }); }
             catch { return "Fecha inválida"; }
         }
-        try { return new Date(d).toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" }); } 
+        try { return new Date(d).toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" }); }  
         catch { return String(d); }
     }
-    function addDays(dateObj, days) {
-        const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0));
-        return d;
-    }
+    function addDays(dateObj, days) { const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0)); return d; }
     function validateNumeroExpediente(v) { return /^\d{1,10}\/\d{4}$/.test((v || "").trim()); }
     function isOverdue(legajo) {
         if (!legajo?.enTransito || !legajo?.vencimiento) return false;
         const vencimientoDate = legajo.vencimiento.toDate ? legajo.vencimiento.toDate() : new Date(legajo.vencimiento);
         return vencimientoDate < new Date();
     }
-    function csvEscape(v) {
-        const s = String(v ?? "");
-        if (/[",\n]/.test(s)) { return '"' + s.replace(/"/g, '""') + '"'; }
-        return s;
-    }
-    function BackgroundGradientAnimation() { return <div className="background-gradient-animation"></div>; }
-    function Pill({ children, color = "gray" }) {
-        const colors = { gray: "bg-gray-100/80 text-gray-800", blue: "bg-blue-100/80 text-blue-800", green: "bg-green-100/80 text-green-800", red: "bg-red-100/80 text-red-800" };
-        return <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${colors[color]}`}>{children}</span>;
-    }
-    function Modal({ open, onClose, title, children, footer }) {
-        if (!open) return null;
-        return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white/80 backdrop-blur-lg shadow-2xl border border-white/30">
-                    <div className="px-5 py-4 border-b border-white/30"><h3 className="text-lg font-semibold text-gray-900">{title}</h3></div>
-                    <div className="p-5 bg-white/50 max-h-[60vh] overflow-y-auto">{children}</div>
-                    <div className="px-5 py-4 border-t border-white/30 flex justify-end gap-2">{footer}</div>
-                </div>
-            </div>
-        );
+    function csvEscape(v) { const s = String(v ?? ""); if (/[",\n]/.test(s)) { return '"' + s.replace(/"/g, '""') + '"'; } return s; }
+    function dateToInputFormat(date) {
+        if (!date) return '';
+        const d = date.toDate ? date.toDate() : new Date(date);
+        if (isNaN(d.getTime())) return '';
+        const pad = (num) => num.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
     
+    function BackgroundGradientAnimation() { return <div className="background-gradient-animation"></div>; }
+    function Pill({ children, color = "gray" }) { const colors = { gray: "bg-gray-100/80 text-gray-800", blue: "bg-blue-100/80 text-blue-800", green: "bg-green-100/80 text-green-800", red: "bg-red-100/80 text-red-800" }; return <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${colors[color]}`}>{children}</span>; }
+    
+    function Modal({ open, onClose, title, children, footer, maxWidth = "max-w-xl" }) {
+        if (!open) return null;
+        return ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}><div className={`relative w-full ${maxWidth} mx-4 rounded-2xl bg-white/80 backdrop-blur-lg shadow-2xl border border-white/30`} onClick={e => e.stopPropagation()}><div className="px-5 py-4 border-b border-white/30"><h3 className="text-lg font-semibold text-gray-900">{title}</h3></div><div className="p-5 bg-white/50 max-h-[70vh] overflow-y-auto">{children}</div><div className="px-5 py-4 border-t border-white/30 flex justify-end gap-2">{footer}</div></div></div> );
+    }
+    
+    function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel, confirmText = "Confirmar", cancelText = "Cancelar", confirmColor = "bg-red-600 hover:bg-red-700" }) {
+        if (!isOpen) return null;
+        return ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="relative w-full max-w-md mx-4 rounded-2xl bg-white/90 backdrop-blur-lg shadow-2xl border border-white/30 p-6"><h3 className="text-xl font-bold text-gray-800">{title}</h3><p className="text-gray-600 mt-2 mb-6">{message}</p><div className="flex justify-end gap-3"><button className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" onClick={onCancel}>{cancelText}</button><button className={`px-4 py-2 text-white rounded-lg transition ${confirmColor}`} onClick={onConfirm}>{confirmText}</button></div></div></div> );
+    }
+
+    function AlertModal({ isOpen, onClose, title, message }) {
+        if (!isOpen) return null;
+        return ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="relative w-full max-w-md mx-4 rounded-2xl bg-white/90 backdrop-blur-lg shadow-2xl border border-white/30 p-6 text-center"><div className="flex justify-center mb-3"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></div><h3 className="text-xl font-bold text-gray-800">{title}</h3><p className="text-gray-600 mt-2 mb-6">{message}</p><div className="flex justify-center"><button className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition" onClick={onClose}>Entendido</button></div></div></div> );
+    }
+
+    function BarcodeModal({ open, onClose, legajo }) { React.useEffect(() => { if (open && legajo) { try { JsBarcode("#barcode-svg-display", legajo.numero, { format: "CODE128", lineColor: "#000", width: 2.5, height: 80, displayValue: false }); } catch (e) { console.error("Error al generar código de barras:", e); } } }, [open, legajo]); const handlePrint = () => { const printWindow = window.open('', '', 'height=600,width=800'); printWindow.document.write('<html><head><title>Imprimir Código de Barras</title>'); printWindow.document.write(`<style>@page{size:A4;margin:0}body{margin:0;font-family:sans-serif}.container{position:fixed;bottom:1.5cm;right:1.5cm;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:5px}.numero{font-size:16px;font-weight:bold;margin:0}.caratula{font-size:11px;color:#555;margin:0}</style>`); printWindow.document.write('</head><body>'); printWindow.document.write('<div class="container">'); printWindow.document.write(`<p class="numero">${legajo.numero}</p>`); printWindow.document.write(`<p class="caratula">${legajo.caratula}</p>`); printWindow.document.write('<svg id="barcode-print"></svg>'); printWindow.document.write('</div>'); printWindow.document.write('<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>'); printWindow.document.write('<script>'); printWindow.document.write(`try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 60, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 250); } catch(e) { console.error("Print Error:", e); window.close(); }`); printWindow.document.write('<\/script></body></html>'); printWindow.document.close(); }; if (!open || !legajo) return null; return ( <Modal open={open} onClose={onClose} title="Código de Barras del Legajo" footer={<><button className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" onClick={onClose}>Cerrar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2" onClick={handlePrint}><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Imprimir</button></>}><div className="text-center p-6 space-y-4"><p className="text-xl font-bold tracking-wider">{legajo.numero}</p><p className="text-gray-700 -mt-2">{legajo.caratula}</p><div className="flex justify-center"><svg id="barcode-svg-display"></svg></div></div></Modal> ); }
+    function DeletedLogModal({ open, onClose, deletedLegajos, onRestore, onPermanentDelete }) { return ( <Modal open={open} onClose={onClose} title="Registro de Legajos Eliminados (Solo Admin)" maxWidth="max-w-4xl" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={onClose}>Cerrar</button></>}><div className="overflow-x-auto">{deletedLegajos.length === 0 ? <p className="text-center text-gray-600 p-8">La papelera está vacía.</p> : ( <table className="w-full text-sm"><thead className="bg-gray-200/50"><tr><th className="p-3 text-left font-semibold text-gray-700">Legajo</th><th className="p-3 text-left font-semibold text-gray-700">Carátula</th><th className="p-3 text-left font-semibold text-gray-700">Fecha de Eliminación</th><th className="p-3 text-left font-semibold text-gray-700">Eliminado por</th><th className="p-3 text-right font-semibold text-gray-700">Acciones</th></tr></thead><tbody>{deletedLegajos.map(l => ( <tr key={l.id} className="border-b last:border-0"><td className="p-3 font-medium">{l.numero}</td><td className="p-3">{l.caratula}</td><td className="p-3">{fmtDateTime(l.deletedAt)}</td><td className="p-3">{l.deletedBy}</td><td className="p-3 text-right space-x-2"><button onClick={() => onRestore(l.id)} className="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-md hover:bg-green-200">Restaurar</button><button onClick={() => onPermanentDelete(l.id)} className="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-md hover:bg-red-200">Eliminar Definitivamente</button></td></tr> ))}</tbody></table> )}</div></Modal> ); }
+    
     // =======================================================
-    //  COMPONENTE DE LA APLICACIÓN PRINCIPAL (PROTEGIDO)
+    //  COMPONENTE DE LA APLICACIÓN PRINCIPAL (CONECTADO A FIREBASE)
     // =======================================================
     function GestorDeLegajos({ user, onSignOut }) {
         const [legajos, setLegajos] = React.useState([]);
+        const [deletedLegajos, setDeletedLegajos] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
-        const [isCreating, setIsCreating] = React.useState(false);
+        const [error, setError] = React.useState(null);
         const [q, setQ] = React.useState("");
         const [current, setCurrent] = React.useState(null);
         const [showNew, setShowNew] = React.useState(false);
         const [showSalida, setShowSalida] = React.useState(false);
         const [showEdit, setShowEdit] = React.useState(false);
         const [showHist, setShowHist] = React.useState(false);
+        const [showBarcode, setShowBarcode] = React.useState(false);
+        const [showDeletedLog, setShowDeletedLog] = React.useState(false);
         const [newForm, setNewForm] = React.useState({ numero: "", caratula: "" });
-        const [editForm, setEditForm] = React.useState({ id: null, numero: "", caratula: "" });
+        const [editForm, setEditForm] = React.useState({ id: null, numero: "", caratula: "", vencimiento: "" });
         const [salidaForm, setSalidaForm] = React.useState({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" });
+        const [confirmation, setConfirmation] = React.useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+        const [alertModal, setAlertModal] = React.useState({ isOpen: false, title: '', message: '' });
+        const [scanned, setScanned] = React.useState(false);
+        const [barcodeListenerActive, setBarcodeListenerActive] = React.useState(true);
 
+        // --- CONEXIÓN A FIREBASE ---
         React.useEffect(() => {
-            const unsubscribe = legajosCollectionRef
-                .orderBy("createdAt", "desc")
-                .onSnapshot((snapshot) => {
-                    const legajosData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setLegajos(legajosData);
-                    setLoading(false);
-                });
-            return () => unsubscribe();
+            const unsubscribeLegajos = legajosCollectionRef.orderBy("createdAt", "desc").onSnapshot(snapshot => {
+                setLegajos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                setError(null);
+                setLoading(false);
+            }, err => { 
+                console.error("Error al leer legajos:", err); 
+                setError("No se pudieron cargar los legajos. Verifique las reglas de seguridad y los índices de Firestore.");
+                setLoading(false); 
+            });
+
+            const unsubscribeDeleted = deletedCollectionRef.orderBy("deletedAt", "desc").onSnapshot(snapshot => {
+                setDeletedLegajos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            }, err => console.error("Error al leer eliminados:", err));
+
+            return () => { unsubscribeLegajos(); unsubscribeDeleted(); };
         }, []);
 
-        const filteredLegajos = React.useMemo(() => {
-            const term = q.trim().toLowerCase();
-            if (!term) return legajos;
-            return legajos.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term));
-        }, [legajos, q]);
+        React.useEffect(() => {
+            let barcode = ''; let lastKeyTime = 0;
+            const handleKeyDown = (e) => {
+                if (!barcodeListenerActive || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+                const currentTime = Date.now();
+                if (currentTime - lastKeyTime > 100) barcode = '';
+                if (e.key === 'Enter') { if (barcode.length > 3) { setQ(barcode); setScanned(true); setTimeout(() => setScanned(false), 500); } barcode = ''; } else if (e.key.length === 1) { barcode += e.key; }
+                lastKeyTime = currentTime;
+            };
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+        }, [barcodeListenerActive]);
+
+        const filteredLegajos = React.useMemo(() => { const term = q.trim().toLowerCase(); if (!term) return legajos; return legajos.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term)); }, [legajos, q]);
         
-        function exportCSV() {
-            if (filteredLegajos.length === 0) {
-                alert("No hay datos para exportar.");
-                return;
-            }
-            const csvRows = [];
-            filteredLegajos.forEach(legajo => {
-                csvRows.push(["LEGAJO:", legajo.numero, legajo.caratula, `(Estado: ${isOverdue(legajo) ? "Vencido" : legajo.enTransito ? "En Tránsito" : "En Juzgado"})`].map(csvEscape).join(','));
-                csvRows.push(["", "Fecha del Movimiento", "Tipo", "Detalle", "Usuario"].map(csvEscape).join(','));
-                if (legajo.historial && legajo.historial.length > 0) {
-                    const sortedHistory = [...legajo.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0));
-                    sortedHistory.forEach(mov => {
-                        csvRows.push(["", fmtDateTime(mov.fecha), mov.tipo, mov.notas, mov.usuario || ""].map(csvEscape).join(','));
-                    });
-                } else {
-                     csvRows.push(["", "Sin movimientos registrados."].map(csvEscape).join(','));
-                }
-                csvRows.push([]);
-            });
-            const csvContent = csvRows.join("\n");
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.setAttribute("href", url);
-            const today = new Date().toISOString().slice(0, 10);
-            link.setAttribute("download", `reporte_legajos_${today}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
+        const handleConfirmation = (conf) => setConfirmation({ ...conf, isOpen: true });
+        const closeConfirmation = () => setConfirmation({ isOpen: false });
+        function handleAbrirBarcode(legajo) { setCurrent(legajo); setShowBarcode(true); }
         
         async function crearLegajo() {
-            if (!validateNumeroExpediente(newForm.numero)) { alert("Formato de N° inválido."); return; }
-            if (!newForm.caratula.trim()) { alert("La carátula es obligatoria."); return; }
+            const numeroTrimmed = newForm.numero.trim();
+            if (!validateNumeroExpediente(numeroTrimmed)) { setAlertModal({ isOpen: true, title: 'Formato Inválido', message: 'El formato del N° de legajo no es válido.' }); return; }
+            if (!newForm.caratula.trim()) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'La carátula no puede estar vacía.' }); return; }
             
-            setIsCreating(true);
-            try {
-                const numeroNormalizado = newForm.numero.trim();
-                const snapshot = await legajosCollectionRef.where("numero", "==", numeroNormalizado).get();
-                if (!snapshot.empty) {
-                    alert("Este número de legajo ya existe en la base de datos.");
-                    setIsCreating(false);
-                    return;
-                }
-                if (!confirm("¿Estás seguro de que deseas guardar los datos?")) {
-                    setIsCreating(false);
-                    return;
-                }
+            const snapshot = await legajosCollectionRef.where("numero", "==", numeroTrimmed).get();
+            if (!snapshot.empty) { setAlertModal({ isOpen: true, title: 'Legajo Duplicado', message: `El número de legajo "${numeroTrimmed}" ya existe.` }); return; }
+            
+            handleConfirmation({ title: 'Confirmar Creación', message: '¿Estás seguro de que deseas crear este nuevo legajo?', onConfirm: async () => { 
                 const nuevoHistorial = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado en el sistema.', usuario: user.email };
-                await legajosCollectionRef.add({
-                    numero: numeroNormalizado,
-                    caratula: newForm.caratula.trim(),
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    enTransito: false,
-                    ubicacionActual: { lugar: "Juzgado", desde: new Date() },
-                    vencimiento: null,
-                    historial: [nuevoHistorial]
-                });
-                setShowNew(false);
-                setNewForm({ numero: "", caratula: "" });
-            } catch (error) {
-                console.error("Error al crear el legajo: ", error);
-                alert("No se pudo crear el legajo.");
-            } finally {
-                setIsCreating(false);
-            }
+                const nuevoLegajoData = { numero: numeroTrimmed, caratula: newForm.caratula.trim(), createdAt: firebase.firestore.FieldValue.serverTimestamp(), enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: [nuevoHistorial] };
+                try {
+                    const docRef = await legajosCollectionRef.add(nuevoLegajoData);
+                    setShowNew(false);
+                    setNewForm({ numero: "", caratula: "" });
+                    closeConfirmation();
+                    handleAbrirBarcode({ id: docRef.id, ...nuevoLegajoData, createdAt: new Date() });
+                } catch (e) { console.error("Error al crear:", e); setAlertModal({ isOpen: true, title: 'Error', message: 'No se pudo crear el legajo.' }); }
+            }, confirmText: 'Sí, Crear', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
         }
+
         async function editarLegajo() {
             if (!editForm.id) return;
-            if (!validateNumeroExpediente(editForm.numero)) { alert("Formato de N° inválido."); return; }
-            if (!editForm.caratula.trim()) { alert("La carátula es obligatoria."); return; }
-            try {
-                const legajoDocRef = legajosCollectionRef.doc(editForm.id);
-                const docSnap = await legajoDocRef.get();
-                const legajoActual = docSnap.data();
-                const nuevoHistorial = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados.`, usuario: user.email };
-                const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
-                await legajoDocRef.update({
-                    numero: editForm.numero.trim(),
-                    caratula: editForm.caratula.trim(),
-                    historial: historialActualizado
-                });
-                setShowEdit(false);
-            } catch (error) {
-                console.error("Error al editar el legajo:", error);
-                alert("No se pudo editar el legajo.");
-            }
+            const numeroTrimmed = editForm.numero.trim();
+            if (!validateNumeroExpediente(numeroTrimmed)) { setAlertModal({ isOpen: true, title: 'Formato Inválido', message: 'El formato del N° de legajo no es válido.' }); return; }
+            if (!editForm.caratula.trim()) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'La carátula no puede estar vacía.' }); return; }
+            const snapshot = await legajosCollectionRef.where("numero", "==", numeroTrimmed).get();
+            if (!snapshot.empty && snapshot.docs[0].id !== editForm.id) { setAlertModal({ isOpen: true, title: 'Legajo Duplicado', message: `El número "${numeroTrimmed}" ya pertenece a otro expediente.` }); return; }
+            handleConfirmation({ title: 'Confirmar Modificación', message: '¿Deseas guardar los cambios?', onConfirm: async () => {
+                const legajoDocRef = legajosCollectionRef.doc(editForm.id); const docSnap = await legajoDocRef.get(); const legajoActual = docSnap.data();
+                let changes = [];
+                if (legajoActual.numero !== editForm.numero.trim()) changes.push(`N° cambiado a "${editForm.numero.trim()}"`);
+                if (legajoActual.caratula !== editForm.caratula.trim()) changes.push(`Carátula modificada`);
+                const newVencimiento = editForm.vencimiento ? new Date(editForm.vencimiento) : null;
+                if (legajoActual.enTransito) { const oldVencimientoMs = legajoActual.vencimiento ? legajoActual.vencimiento.toMillis() : null; const newVencimientoMs = newVencimiento ? newVencimiento.getTime() : null; if (oldVencimientoMs !== newVencimientoMs) changes.push(`Vencimiento actualizado a ${fmtDateTime(newVencimiento)}`); }
+                if (changes.length > 0) { const notasHistorial = changes.join('. '); const nuevoHistorial = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: notasHistorial, usuario: user.email }; await legajoDocRef.update({ numero: editForm.numero.trim(), caratula: editForm.caratula.trim(), vencimiento: legajoActual.enTransito ? newVencimiento : legajoActual.vencimiento, historial: firebase.firestore.FieldValue.arrayUnion(nuevoHistorial) }); }
+                setShowEdit(false); closeConfirmation();
+            }, confirmText: 'Guardar', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
         }
-        async function registrarEntrada(legajoId) {
-            try {
-                const legajoDocRef = legajosCollectionRef.doc(legajoId);
-                const docSnap = await legajoDocRef.get();
-                const legajoActual = docSnap.data();
+
+        function registrarEntrada(legajoId) {
+            handleConfirmation({ title: 'Confirmar Entrada', message: '¿Confirmas el reingreso al Juzgado?', onConfirm: async () => {
                 const nuevoHistorial = { id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email };
-                const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
-                await legajoDocRef.update({
-                    enTransito: false,
-                    ubicacionActual: { lugar: "Juzgado", desde: new Date() },
-                    vencimiento: null,
-                    historial: historialActualizado
-                });
-            } catch (error) {
-                 console.error("Error al registrar entrada:", error);
-                 alert("No se pudo registrar la entrada.");
-            }
+                await legajosCollectionRef.doc(legajoId).update({ enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: firebase.firestore.FieldValue.arrayUnion(nuevoHistorial) });
+                closeConfirmation();
+            }, confirmText: 'Registrar', confirmColor: 'bg-green-600 hover:bg-green-700' });
         }
-        async function registrarSalida() {
+
+        function registrarSalida() {
             if (!current) return;
             const dependenciaFinal = salidaForm.dependencia === 'Otra' ? salidaForm.otraDependencia.trim() : salidaForm.dependencia;
-            if (!dependenciaFinal) { alert("Debe especificar una dependencia."); return; }
-            try {
-                const legajoDocRef = legajosCollectionRef.doc(current.id);
-                const docSnap = await legajoDocRef.get();
-                const legajoActual = docSnap.data();
-                const now = new Date();
-                const venc = salidaForm.plazoDias ? addDays(now, salidaForm.plazoDias) : null;
-                const nuevoHistorial = { id: uid(), tipo: 'SALIDA', fecha: new Date(), notas: `Enviado a ${dependenciaFinal}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc, usuario: user.email };
-                const historialActualizado = [nuevoHistorial, ...(legajoActual.historial || [])];
-                await legajoDocRef.update({
-                    enTransito: true,
-                    ubicacionActual: { lugar: dependenciaFinal, desde: new Date() },
-                    vencimiento: venc,
-                    historial: historialActualizado
-                });
-                setShowSalida(false);
-            } catch (error) {
-                console.error("Error al registrar salida:", error);
-                alert("No se pudo registrar la salida.");
-            }
-        }
-        async function eliminarLegajo(legajoId) {
-            if (confirm("¿Seguro que quieres eliminar este legajo? Esta acción no se puede deshacer.")) {
-                await legajosCollectionRef.doc(legajoId).delete();
-            }
+            if (!dependenciaFinal) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'Debe especificar una dependencia.' }); return; }
+            handleConfirmation({ title: 'Confirmar Salida', message: `¿Confirmas el envío a "${dependenciaFinal}"?`, onConfirm: async () => {
+                const now = new Date(); const venc = salidaForm.plazoDias ? addDays(now, salidaForm.plazoDias) : null;
+                const nuevoHistorial = { id: uid(), tipo: 'SALIDA', fecha: now, notas: `Enviado a ${dependenciaFinal}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc, usuario: user.email };
+                await legajosCollectionRef.doc(current.id).update({ enTransito: true, ubicacionActual: { lugar: dependenciaFinal, desde: now }, vencimiento: venc, historial: firebase.firestore.FieldValue.arrayUnion(nuevoHistorial) });
+                setShowSalida(false); closeConfirmation();
+            }, confirmText: 'Registrar Salida', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
         }
         
+        function eliminarLegajo(legajoId) {
+            handleConfirmation({ title: '¿Enviar a Papelera?', message: 'El legajo se moverá al registro de eliminados. ¿Continuar?', onConfirm: async () => {
+                const legajoDocRef = legajosCollectionRef.doc(legajoId); const doc = await legajoDocRef.get();
+                if (doc.exists) { const legajoData = doc.data(); const deletionRecord = { ...legajoData, deletedAt: new Date(), deletedBy: user.email }; deletionRecord.historial.unshift({ id: uid(), tipo: 'ELIMINACIÓN', fecha: new Date(), notas: 'Movido a papelera.', usuario: user.email }); await deletedCollectionRef.doc(legajoId).set(deletionRecord); await legajoDocRef.delete(); }
+                closeConfirmation();
+            }, confirmText: 'Sí, Enviar', confirmColor: 'bg-yellow-600 hover:bg-yellow-700' });
+        }
+
+        async function restoreLegajo(legajoId) {
+            const deletedDocRef = deletedCollectionRef.doc(legajoId); const doc = await deletedDocRef.get();
+            if (doc.exists) { const { deletedAt, deletedBy, ...restoredData } = doc.data(); restoredData.historial.unshift({ id: uid(), tipo: 'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado desde papelera.', usuario: user.email }); await legajosCollectionRef.doc(legajoId).set(restoredData); await deletedDocRef.delete(); }
+        }
+
+        function permanentlyDeleteLegajo(legajoId) {
+            handleConfirmation({ title: '¡Eliminación Permanente!', message: 'Esta acción es IRREVERSIBLE. ¿Estás seguro?', onConfirm: async () => { await deletedCollectionRef.doc(legajoId).delete(); closeConfirmation(); }, confirmText: 'Sí, Eliminar PERMANENTEMENTE' });
+        }
+
+        function exportCSV() {
+            if (filteredLegajos.length === 0) { setAlertModal({isOpen: true, title: "Sin Datos", message: "No hay legajos para exportar."}); return; }
+            const csvRows = [];
+            filteredLegajos.forEach(legajo => {
+                const estado = isOverdue(legajo) ? "Vencido" : legajo.enTransito ? "En Tránsito" : "En Juzgado";
+                csvRows.push([ "LEGAJO:", legajo.numero, legajo.caratula, `Estado: ${estado}`, `Ubicación: ${legajo.ubicacionActual?.lugar || "N/D"}` ].map(csvEscape).join(','));
+                csvRows.push([ "", "Fecha Movimiento", "Tipo", "Detalle", "Usuario" ].map(csvEscape).join(','));
+                if (legajo.historial && legajo.historial.length > 0) { [...legajo.historial].sort((a, b) => b.fecha.toMillis() - a.fecha.toMillis()).forEach(mov => { csvRows.push([ "", fmtDateTime(mov.fecha), mov.tipo, mov.notas, mov.usuario || "" ].map(csvEscape).join(',')); }); } 
+                else { csvRows.push(["", "Sin movimientos."].map(csvEscape).join(',')); }
+                csvRows.push([]);
+            });
+            const csvContent = csvRows.join("\n"); const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.setAttribute("href", url); const today = new Date().toISOString().slice(0, 10); link.setAttribute("download", `reporte_legajos_${today}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
         function handleAbrirSalida(legajo) { setCurrent(legajo); setSalidaForm({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" }); setShowSalida(true); }
-        function handleAbrirEdit(legajo) { setCurrent(legajo); setEditForm({id: legajo.id, numero: legajo.numero, caratula: legajo.caratula}); setShowEdit(true); }
+        function handleAbrirEdit(legajo) { setCurrent(legajo); setEditForm({ id: legajo.id, numero: legajo.numero, caratula: legajo.caratula, vencimiento: legajo.enTransito ? dateToInputFormat(legajo.vencimiento) : '' }); setShowEdit(true); }
         function handleVerHistorial(legajo) { setCurrent(legajo); setShowHist(true); }
 
         return (
@@ -279,30 +282,47 @@
                     <header className="bg-white/70 backdrop-blur-sm border-b border-white/30 p-4 flex justify-between items-center sticky top-0 z-20 shadow-md">
                         <div>
                             <h1 className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent drop-shadow-lg bg-gradient-to-b from-gray-700 to-gray-900">Gestión de Legajos EESS - JUZGADO DE EJECUCION PENAL N° 2</h1>
-                            <p className="text-xs text-gray-600">Sesión iniciada: {user.email}</p>
+                             <div>
+                                <p className="text-xs text-gray-600">Sesión iniciada: {user.email}</p>
+                                <p className="text-xs text-gray-500 italic mt-1">CREATE BY RBM 2025</p>
+                            </div>
                         </div>
                         <div className="flex items-center gap-4">
-                            <button className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition" onClick={exportCSV}>⬇️ Exportar</button>
+                             <button className="px-3 py-2 bg-white/80 text-gray-700 rounded-lg shadow-lg hover:bg-gray-200 transition relative" onClick={() => setShowDeletedLog(true)} title="Registro de Eliminados (Admin)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                {deletedLegajos.length > 0 && <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">{deletedLegajos.length}</span>}
+                            </button>
+                            <button className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition" onClick={exportCSV}>⬇️ Exportar CSV</button>
                             <button className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition" onClick={() => setShowNew(true)}>➕ Nuevo Legajo</button>
                             <button className="text-sm font-bold text-gray-700 hover:text-red-600" onClick={onSignOut}>Cerrar Sesión</button>
                         </div>
                     </header>
                     <main className="max-w-7xl mx-auto px-4 py-6">
-                        <div className="mb-6"><input value={q} onChange={(e) => setQ(e.target.value)} placeholder=" Buscar por N° o Carátula..." className="border p-3 rounded-lg w-full shadow-lg"/></div>
-                        {loading && <div className="text-center text-white py-8"><p className="bg-black/20 inline-block p-4 rounded-lg">Cargando...</p></div>}
+                        <div className="flex items-center gap-4 mb-6">
+                            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder=" Buscar por N° o Carátula... (o escanear código de barras)" className={`border p-3 rounded-lg w-full shadow-lg barcode-active-indicator ${scanned ? 'barcode-scanned' : ''}`}/>
+                            <button onClick={() => setBarcodeListenerActive(!barcodeListenerActive)} title="Activar/Desactivar Lector de Códigos de Barras" className={`flex items-center gap-2 p-3 rounded-lg shadow-lg whitespace-nowrap transition ${barcodeListenerActive ? 'bg-green-100' : 'bg-gray-200'}`}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={barcodeListenerActive ? 'text-green-600' : 'text-gray-500'}><path d="M3 6h18M6 12h12M9 18h6"/></svg>
+                                <span className={`text-sm font-medium hidden md:inline ${barcodeListenerActive ? 'text-green-700' : 'text-gray-600'}`}>{barcodeListenerActive ? 'Lector Activo' : 'Lector Inactivo'}</span>
+                            </button>
+                        </div>
+
+                        {loading && <div className="text-center text-white py-8"><p className="bg-black/20 inline-block p-4 rounded-lg">Cargando legajos...</p></div>}
+                        {error && <div className="text-center bg-red-100 text-red-800 p-4 rounded-lg shadow-md"><strong>Error:</strong> {error}</div>}
+
                         <div className="overflow-x-auto rounded-xl border border-white/20 bg-white/60 backdrop-blur-md shadow-2xl">
                             <table className="w-full text-sm">
                                 <thead className="bg-white/50"><tr><th className="p-4 text-left font-semibold text-gray-700">Legajo N°</th><th className="p-4 text-left font-semibold text-gray-700">Carátula</th><th className="p-4 text-left font-semibold text-gray-700">Ubicación</th><th className="p-4 text-left font-semibold text-gray-700">Vencimiento</th><th className="p-4 text-left font-semibold text-gray-700">Estado</th><th className="p-4 text-right font-semibold text-gray-700">Acciones</th></tr></thead>
                                 <tbody>
-                                    {!loading && filteredLegajos.length === 0 && (<tr><td className="p-6 text-center text-gray-700" colSpan={6}>No se encontraron legajos.</td></tr>)}
+                                    {!loading && !error && filteredLegajos.length === 0 && (<tr><td className="p-6 text-center text-gray-700" colSpan={6}>No se encontraron legajos.</td></tr>)}
                                     {filteredLegajos.map(l => (
                                         <tr key={l.id} className="border-t border-white/50 hover:bg-white/60">
                                             <td className="p-4 font-medium">{l.numero}</td><td className="p-4">{l.caratula}</td><td className="p-4">{l.ubicacionActual?.lugar}</td><td className="p-4">{l.vencimiento ? fmtDateTime(l.vencimiento) : '—'}</td><td className="p-4">{isOverdue(l) ? <Pill color="red">Vencido</Pill> : l.enTransito ? <Pill color="blue">En Tránsito</Pill> : <Pill color="green">En Juzgado</Pill>}</td>
-                                            <td className="p-4 text-right space-x-2 whitespace-nowrap">
+                                            <td className="p-4 text-right space-x-1 whitespace-nowrap">
                                                 {l.enTransito ? <button onClick={() => registrarEntrada(l.id)} className="px-3 py-1.5 bg-green-600 text-white rounded-md text-xs hover:bg-green-700 shadow">⬅️ Entrada</button> : <button onClick={() => handleAbrirSalida(l)} className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs hover:bg-blue-700 shadow">➡️ Salida</button>}
-                                                <button onClick={() => handleVerHistorial(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow">🕘 Historial</button>
-                                                <button onClick={() => handleAbrirEdit(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow">📝 Editar</button>
-                                                <button onClick={() => eliminarLegajo(l.id)} className="px-3 py-1.5 bg-red-100/80 text-red-800 rounded-md text-xs hover:bg-red-200 shadow">🗑️</button>
+                                                <button onClick={() => handleVerHistorial(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow">🕘 Hist.</button>
+                                                <button onClick={() => handleAbrirEdit(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow">📝 Edit.</button>
+                                                <button onClick={() => handleAbrirBarcode(l)} title="Generar Código de Barras" className="px-2 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg></button>
+                                                <button onClick={() => eliminarLegajo(l.id)} title="Enviar a Papelera" className="px-3 py-1.5 bg-yellow-100/80 text-yellow-800 rounded-md text-xs hover:bg-yellow-200 shadow">🗑️</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -311,24 +331,31 @@
                         </div>
                     </main>
                 </div>
-                {/* Modales */}
-                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:bg-blue-300" onClick={crearLegajo} disabled={isCreating}>{isCreating ? 'Verificando...' : 'Confirmar y Crear'}</button></>}>
-                    <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                
+                <AlertModal isOpen={alertModal.isOpen} onClose={() => setAlertModal({isOpen: false})} title={alertModal.title} message={alertModal.message} />
+                <ConfirmationModal isOpen={confirmation.isOpen} title={confirmation.title} message={confirmation.message} onConfirm={confirmation.onConfirm} onCancel={closeConfirmation} confirmText={confirmation.confirmText} confirmColor={confirmation.confirmColor} />
+                <BarcodeModal open={showBarcode} onClose={() => setShowBarcode(false)} legajo={current} />
+                <DeletedLogModal open={showDeletedLog} onClose={() => setShowDeletedLog(false)} deletedLegajos={deletedLegajos} onRestore={restoreLegajo} onPermanentDelete={permanentlyDeleteLegajo} />
+                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={crearLegajo}>Crear Legajo</button></>}>
+                    <div><label className="font-semibold text-gray-800">Legajo N° (formato: 1234/2024)</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                     <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={newForm.caratula} onChange={(e) => setNewForm({...newForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button onClick={() => setShowEdit(false)}>Cancelar</button><button onClick={editarLegajo}>Guardar Cambios</button></>}>
+                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowEdit(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={editarLegajo}>Guardar Cambios</button></>}>
                     <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={editForm.numero} onChange={(e) => setEditForm({...editForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                     <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={editForm.caratula} onChange={(e) => setEditForm({...editForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+                    {current && current.enTransito && (
+                        <div className="mt-4"><label className="font-semibold text-gray-800">Fecha de Vencimiento</label><input type="datetime-local" value={editForm.vencimiento} onChange={(e) => setEditForm({...editForm, vencimiento: e.target.value})} className="border p-2 rounded-lg w-full mt-1 bg-white"/><p className="text-xs text-gray-500 mt-1">Este campo es editable porque el legajo está "En Tránsito".</p></div>
+                    )}
                 </Modal>
-                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button onClick={() => setShowSalida(false)}>Cancelar</button><button onClick={registrarSalida}>Registrar Salida</button></>}>
+                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowSalida(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={registrarSalida}>Registrar Salida</button></>}>
                     <div><label className="font-semibold text-gray-800">Dependencia</label><select value={salidaForm.dependencia} onChange={(e) => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1">{DEPENDENCIAS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
                     {salidaForm.dependencia === 'Otra' && <div className="mt-4"><label className="font-semibold text-gray-800">Especifique otra dependencia</label><input value={salidaForm.otraDependencia} onChange={(e) => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>}
                     <div className="mt-4"><label className="font-semibold text-gray-800">Plazo de devolución (días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={(e) => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
                 </Modal>
-                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button onClick={() => setShowHist(false)}>Cerrar</button></>}>
-                    {current?.historial && current.historial.length > 0 ? (
+                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowHist(false)}>Cerrar</button></>}>
+                     {current?.historial && current.historial.length > 0 ? (
                         <ul className="space-y-3">
-                            {[...current.historial].sort((a, b) => (b.fecha?.seconds || 0) - (a.fecha?.seconds || 0)).map(mov => (
+                            {[...current.historial].sort((a,b) => b.fecha.toMillis() - a.fecha.toMillis()).map(mov => (
                                 <li key={mov.id} className="text-sm border-b pb-2 last:border-b-0">
                                     <div className="flex justify-between items-center"><span className="font-semibold">{mov.tipo}</span><span className="text-xs">{fmtDateTime(mov.fecha)}</span></div>
                                     <p className="mt-1">{mov.notas}</p>
@@ -341,7 +368,7 @@
             </div>
         );
     }
-
+    
     // =======================================================
     //  PANTALLA DE LOGIN
     // =======================================================
@@ -382,7 +409,7 @@
     }
 
     // =======================================================
-    //  COMPONENTE PRINCIPAL QUE DECIDE QUÉ MOSTRAR
+    //  COMPONENTE PRINCIPAL QUE GESTIONA LA AUTENTICACIÓN
     // =======================================================
     function App() {
         const [user, setUser] = React.useState(null);
@@ -396,24 +423,16 @@
             return () => unsubscribe();
         }, []);
 
-        const handleSignOut = () => {
-            auth.signOut();
-        };
-
-        if (loading) {
-            return <div className="min-h-screen flex items-center justify-center bg-gray-800 text-white"><p>Verificando sesión...</p></div>;
-        }
-
-        if (user) {
-            return <GestorDeLegajos user={user} onSignOut={handleSignOut} />;
-        } else {
-            return <LoginScreen />;
-        }
+        const handleSignOut = () => { auth.signOut(); };
+        if (loading) { return <div className="min-h-screen flex items-center justify-center bg-gray-800 text-white"><p>Verificando sesión...</p></div>; }
+        if (user) { return <GestorDeLegajos user={user} onSignOut={handleSignOut} />; } 
+        else { return <LoginScreen />; }
     }
-    
+        
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
 
     </script>
 </body>
 </html>
+
