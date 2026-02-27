@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v24.1 (Impresión de Vista)</title>
+    <title>Gestión de Legajos v26.5 (Auditoría de Movimientos Real)</title>
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -15,41 +15,56 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #020617;
+        }
+
         @keyframes move-gradient {
             0% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
             100% { background-position: 0% 50%; }
         }
+
         .background-gradient-animation {
-            background: linear-gradient(-45deg, #1b263b, #415a77, #778da9, #0d1b2a);
+            background: linear-gradient(-45deg, #0f172a, #1e293b, #334155, #020617);
             background-size: 400% 400%;
-            animation: move-gradient 20s ease infinite;
+            animation: move-gradient 15s ease infinite;
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            z-index: -1;
         }
-        .barcode-active-indicator { transition: all 0.3s ease; }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
         .barcode-scanned {
-            box-shadow: 0 0 15px 5px rgba(59, 130, 246, 0.6) !important;
-            transform: scale(1.02);
+            box-shadow: 0 0 20px 2px rgba(59, 130, 246, 0.4);
+            border-color: rgba(59, 130, 246, 0.5) !important;
         }
+
         .highlighted-row {
-            background-color: #3b82f6 !important; /* Tailwind's blue-500 */
-            color: white !important;
+            background: rgba(59, 130, 246, 0.2) !important;
+            border-left: 4px solid #3b82f6 !important;
         }
-        .highlighted-row:hover {
-            background-color: #2563eb !important; /* Tailwind's blue-600 */
-        }
-        .highlighted-row span { /* Adapta el color de los Pills */
-            background-color: rgba(255, 255, 255, 0.2) !important;
-            color: white !important;
-        }
-        .highlighted-row button { /* Adapta el borde de los botones */
-            border: 1px solid rgba(255,255,255,0.5);
-        }
+
+        /* Scrollbar personalizada */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
     </style>
 </head>
-<body>
+<body class="text-slate-200 antialiased">
     <div id="root"></div>
+
     <script type="text/babel">
     
     // =======================================================
@@ -63,989 +78,637 @@
       messagingSenderId: "599295230532",
       appId: "1:599295230532:web:bd18f19ce6317d56987211"
     };
+
     let db, auth;
     try {
-        firebase.initializeApp(firebaseConfig);
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
         db = firebase.firestore();
         auth = firebase.auth();
     } catch (e) {
-        console.error("Error al inicializar Firebase. ¿Están las credenciales correctas?", e);
-        document.body.innerHTML = `<div style="padding:2rem;text-align:center;font-family:sans-serif;background-color:#fff3f3;color:#b91c1c;"><h1>Error de Configuración de Firebase</h1><p>No se pudo conectar a la base de datos. Por favor, verifica que las credenciales en la variable <strong>firebaseConfig</strong> sean correctas.</p></div>`;
+        console.error("Firebase Init Error:", e);
     }
+
     const legajosCollectionRef = db.collection("legajos");
     const deletedCollectionRef = db.collection("legajos_eliminados");
     const instructoresCollectionRef = db.collection("instructores");
+
     // =======================================================
-    //  UTILS & UI COMPONENTS
+    //  UTILIDADES
     // =======================================================
     const DEPENDENCIAS = ["Fiscalía Correccional N° 1", "Fiscalía Correccional N° 2", "Fiscalía Correccional N° 3","Defensoría N° 1", "Defensoría N° 2", "Defensoría N° 3", "Defensoría N° 4", "Defensoría N° 5", "Defensoría N° 6","Gabinete Técnico de Ejecución", "Corte de Justicia", "Otra"];
-    function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
-    function fmtDateTime(d) {
-        if (!d) return "—";
-        if (d.toDate) {
-            try { return d.toDate().toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" }); }
-            catch { return "Fecha inválida"; }
-        }
-        try { return new Date(d).toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" }); }  
-        catch { return String(d); }
-    }
-    function fmtDate(d) {
+
+    const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    
+    const fmtDateTime = (d) => {
         if (!d) return "—";
         const date = d.toDate ? d.toDate() : new Date(d);
-        try { return date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" }); }  
-        catch { return String(d); }
-    }
-    function addDays(dateObj, days) { const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0)); return d; }
-    function validateNumeroExpediente(v) { return /^\d{1,10}\/\d{4}$/.test((v || "").trim()); }
-    function isOverdue(legajo) {
-        if (!legajo?.enTransito || !legajo?.vencimiento) return false;
-        const vencimientoDate = legajo.vencimiento.toDate ? legajo.vencimiento.toDate() : new Date(legajo.vencimiento);
-        return vencimientoDate < new Date();
-    }
-    function csvEscape(v) { const s = String(v ?? ""); if (/[",\n]/.test(s)) { return '"' + s.replace(/"/g, '""') + '"'; } return s; }
-    
-    function dateToInputFormat(date) {
-        if (!date) return '';
-        const d = date.toDate ? date.toDate() : new Date(date);
-        if (isNaN(d.getTime())) return '';
-        const pad = (num) => num.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-    function dateToInputString(date = new Date()) {
+        if (isNaN(date.getTime())) return "—";
+        return date.toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+    };
+
+    const isOverdue = (l) => {
+        if (!l?.enTransito || !l?.vencimiento) return false;
+        const venc = l.vencimiento.toDate ? l.vencimiento.toDate() : new Date(l.vencimiento);
+        return venc < new Date();
+    };
+
+    const isSameDay = (d1, d2) => {
+        if (!d1 || !d2) return false;
+        const date1 = d1.toDate ? d1.toDate() : new Date(d1);
+        const date2 = d2.toDate ? d2.toDate() : new Date(d2);
+        return date1.getDate() === date2.getDate() && date1.getMonth() === date2.getMonth() && date1.getFullYear() === date2.getFullYear();
+    };
+
+    const dateToInputString = (date = new Date()) => {
         const d = new Date(date);
         const pad = (num) => num.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    }
-    function isSameDay(date1, date2) {
-        if (!date1 || !date2) return false;
-        const d1 = date1.toDate ? date1.toDate() : new Date(date1);
-        const d2 = date2.toDate ? date2.toDate() : new Date(date2);
-        
-        if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return false;
-        return d1.getDate() === d2.getDate() &&
-               d1.getMonth() === d2.getMonth() &&
-               d1.getFullYear() === d2.getFullYear();
-    }
-    
-    function isToday(date) {
-        return isSameDay(date, new Date());
-    }
-    
+    };
+
+    const dateToInputFormat = (date) => {
+        if (!date) return '';
+        const d = date.toDate ? date.toDate() : new Date(date);
+        const pad = (num) => num.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    const validateNumeroExpediente = (v) => /^\d{1,10}\/\d{4}$/.test((v || "").trim());
+    const addDays = (dateObj, days) => { const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0)); return d; };
+
+    // =======================================================
+    //  COMPONENTES UI
+    // =======================================================
     function BackgroundGradientAnimation() { return <div className="background-gradient-animation"></div>; }
-    function Pill({ children, color = "gray" }) { const colors = { gray: "bg-gray-100/80 text-gray-800", blue: "bg-blue-100/80 text-blue-800", green: "bg-green-100/80 text-green-800", red: "bg-red-100/80 text-red-800" }; return <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${colors[color]}`}>{children}</span>; }
-    
-    function Modal({ open, onClose, title, children, footer, maxWidth = "max-w-xl" }) {
+
+    const Pill = ({ children, color = "gray" }) => {
+        const variants = {
+            gray: "bg-slate-700 text-slate-300 border-slate-600",
+            blue: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+            green: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+            red: "bg-rose-500/20 text-rose-400 border-rose-500/30",
+            purple: "bg-purple-500/20 text-purple-400 border-purple-500/30"
+        };
+        return <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${variants[color]}`}>{children}</span>;
+    };
+
+    const ActionButton = ({ onClick, icon, title, color = "slate" }) => {
+        const colors = {
+            blue: "bg-blue-600 hover:bg-blue-500 text-white",
+            green: "bg-emerald-600 hover:bg-emerald-500 text-white",
+            red: "bg-rose-600 hover:bg-rose-500 text-white",
+            slate: "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600",
+            purple: "bg-purple-600 hover:bg-purple-500 text-white",
+            yellow: "bg-amber-600 hover:bg-amber-500 text-white"
+        };
+        return (
+            <button onClick={onClick} title={title} className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center ${colors[color]}`}>
+                {icon}
+            </button>
+        );
+    };
+
+    const Modal = ({ open, onClose, title, children, footer, maxWidth = "max-w-xl" }) => {
         if (!open) return null;
-        return ( <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}><div className={`relative w-full ${maxWidth} mx-4 rounded-2xl bg-white/80 backdrop-blur-lg shadow-2xl border border-white/30`} onClick={e => e.stopPropagation()}><div className="px-5 py-4 border-b border-white/30"><h3 className="text-lg font-semibold text-gray-900">{title}</h3></div><div className="p-5 bg-white/50 max-h-[70vh] overflow-y-auto">{children}</div><div className="px-5 py-4 border-t border-white/30 flex justify-end gap-2">{footer}</div></div></div> );
-    }
-    
-    function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel, confirmText = "Confirmar", cancelText = "Cancelar", confirmColor = "bg-red-600 hover:bg-red-700" }) {
-        if (!isOpen) return null;
-        return ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="relative w-full max-w-md mx-4 rounded-2xl bg-white/90 backdrop-blur-lg shadow-2xl border border-white/30 p-6"><h3 className="text-xl font-bold text-gray-800">{title}</h3><p className="text-gray-600 mt-2 mb-6">{message}</p><div className="flex justify-end gap-3"><button className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" onClick={onCancel}>{cancelText}</button><button className={`px-4 py-2 text-white rounded-lg transition ${confirmColor}`} onClick={onConfirm}>{confirmText}</button></div></div></div> );
-    }
-    function AlertModal({ isOpen, onClose, title, message }) {
-        if (!isOpen) return null;
-        return ( <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="relative w-full max-w-md mx-4 rounded-2xl bg-white/90 backdrop-blur-lg shadow-2xl border border-white/30 p-6 text-center"><div className="flex justify-center mb-3"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></div><h3 className="text-xl font-bold text-gray-800">{title}</h3><p className="text-gray-600 mt-2 mb-6">{message}</p><div className="flex justify-center"><button className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition" onClick={onClose}>Entendido</button></div></div></div> );
-    }
+        return (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" onClick={onClose}>
+                <div className={`relative w-full ${maxWidth} glass-panel rounded-3xl shadow-2xl overflow-hidden`} onClick={e => e.stopPropagation()}>
+                    <div className="px-6 py-5 border-b border-white/10 flex justify-between items-center bg-white/5">
+                        <h3 className="text-xl font-bold text-white tracking-tight">{title}</h3>
+                        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
+                    </div>
+                    <div className="p-6 overflow-y-auto max-h-[70vh] text-slate-300">{children}</div>
+                    {footer && <div className="px-6 py-4 border-t border-white/10 flex justify-end gap-3 bg-white/5">{footer}</div>}
+                </div>
+            </div>
+        );
+    };
+
     function BarcodeModal({ open, onClose, legajo }) {
         React.useEffect(() => {
             if (open && legajo) {
-                try {
-                    JsBarcode("#barcode-svg-display", legajo.numero, {
-                        format: "CODE128", lineColor: "#000", width: 2.5, height: 80, displayValue: true, text: legajo.numero
-                    });
-                } catch (e) {
-                    console.error("Error al generar código de barras:", e);
-                }
+                try { JsBarcode("#barcode-svg-display", legajo.numero, { format: "CODE128", lineColor: "#000", width: 2.5, height: 80, displayValue: true, text: legajo.numero }); } catch (e) { console.error("Error JSBarcode:", e); }
             }
         }, [open, legajo]);
+
         const handlePrint = () => {
             const printWindow = window.open('', '', 'height=600,width=800');
             printWindow.document.write('<html><head><title>Imprimir Código de Barras</title>');
             printWindow.document.write(`
                 <style>
                     @page { size: A4; margin: 0; }
-                    body { margin: 0; font-family: sans-serif; }
-                    .container { position: fixed; bottom: 1.5cm; right: 1.5cm; }
+                    body { margin: 0; font-family: sans-serif; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; }
+                    .container { margin-bottom: 1.5cm; margin-right: 1.5cm; }
                 </style>
             `);
             printWindow.document.write('</head><body>');
             printWindow.document.write('<div class="container"><svg id="barcode-print"></svg></div>');
             printWindow.document.write('<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>');
             printWindow.document.write('<script>');
-            printWindow.document.write(`
-                try {
-                    JsBarcode("#barcode-print", "${legajo.numero}", {
-                        format: "CODE128", lineColor: "#000", width: 2.5, height: 100, displayValue: false
-                    });
-                    setTimeout(() => {
-                        window.print();
-                        window.close();
-                    }, 250);
-                } catch(e) { console.error("Print Error:", e); window.close(); }
-            `);
+            printWindow.document.write(`try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 100, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 300); } catch(e) { window.close(); }`);
             printWindow.document.write('<\/script></body></html>');
             printWindow.document.close();
         };
         if (!open || !legajo) return null;
         return (
-            <Modal open={open} onClose={onClose} title="Código de Barras del Legajo" 
-                   footer={<>
-                       <button className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition" onClick={onClose}>Cerrar</button>
-                       <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2" onClick={handlePrint}>
-                           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                           Imprimir
-                       </button>
-                   </>}>
+            <Modal open={open} onClose={onClose} title="Etiqueta de Código de Barras" 
+                   footer={<><button className="px-4 py-2 bg-slate-700 rounded-lg text-xs font-bold" onClick={onClose}>Cerrar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold" onClick={handlePrint}>🖨️ Imprimir</button></>}>
                 <div className="text-center p-6 space-y-4">
-                    <div className="flex justify-center">
-                        <svg id="barcode-svg-display"></svg>
-                    </div>
+                    <div className="flex justify-center bg-white p-4 rounded-lg shadow-inner"><svg id="barcode-svg-display"></svg></div>
+                    <p className="text-sm text-slate-400 italic">Posición de impresión: Esquina inferior derecha (A4).</p>
                 </div>
             </Modal>
         );
     }
-    function DeletedLogModal({ open, onClose, deletedLegajos, onRestore, onPermanentDelete }) { return ( <Modal open={open} onClose={onClose} title="Registro de Legajos Eliminados (Solo Admin)" maxWidth="max-w-4xl" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={onClose}>Cerrar</button></>}><div className="overflow-x-auto">{deletedLegajos.length === 0 ? <p className="text-center text-gray-600 p-8">La papelera está vacía.</p> : ( <table className="w-full text-sm"><thead className="bg-gray-200/50"><tr><th className="p-3 text-left font-semibold text-gray-700">Legajo</th><th className="p-3 text-left font-semibold text-gray-700">Carátula</th><th className="p-3 text-left font-semibold text-gray-700">Fecha de Eliminación</th><th className="p-3 text-left font-semibold text-gray-700">Eliminado por</th><th className="p-3 text-right font-semibold text-gray-700">Acciones</th></tr></thead><tbody>{deletedLegajos.map(l => ( <tr key={l.id} className="border-b last:border-0"><td className="p-3 font-medium">{l.numero}</td><td className="p-3">{l.caratula}</td><td className="p-3">{fmtDateTime(l.deletedAt)}</td><td className="p-3">{l.deletedBy}</td><td className="p-3 text-right space-x-2"><button onClick={() => onRestore(l.id)} className="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-md hover:bg-green-200">Restaurar</button><button onClick={() => onPermanentDelete(l.id)} className="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-md hover:bg-red-200">Eliminar Definitivamente</button></td></tr> ))}</tbody></table> )}</div></Modal> ); }
-    
+
     function InstructoresModal({ open, onClose, instructores, legajos, onAdd, onEdit, onDelete, onAlert }) {
-        const [newInstructorName, setNewInstructorName] = React.useState('');
-        const [editingInstructor, setEditingInstructor] = React.useState(null); // { id, nombre }
+        const [newName, setNewName] = React.useState('');
+        const [editing, setEditing] = React.useState(null);
         const handleAdd = () => {
-            const name = newInstructorName.trim();
-            if (!name) { onAlert('El nombre no puede estar vacío.'); return; }
-            if (instructores.some(i => i.nombre.toLowerCase() === name.toLowerCase())) { onAlert('Ya existe un instructor con ese nombre.'); return; }
-            onAdd(name);
-            setNewInstructorName('');
-        };
-        const handleUpdate = () => {
-            const name = editingInstructor.nombre.trim();
-            if (!name) { onAlert('El nombre no puede estar vacío.'); return; }
-            if (instructores.some(i => i.nombre.toLowerCase() === name.toLowerCase() && i.id !== editingInstructor.id)) { onAlert('Ya existe otro instructor con ese nombre.'); return; }
-            onEdit(editingInstructor.id, name);
-            setEditingInstructor(null);
-        };
-        const handleDelete = (instructor) => {
-            const isAssigned = legajos.some(l => l.instructorId === instructor.id);
-            if (isAssigned) {
-                onAlert(`No se puede eliminar a "${instructor.nombre}" porque está asignado a uno o más legajos.`);
-            } else {
-                onDelete(instructor.id);
-            }
+            const n = newName.trim();
+            if (!n) return onAlert('Ingrese un nombre.');
+            onAdd(n); setNewName('');
         };
         return (
-            <Modal open={open} onClose={onClose} title="Gestionar Instructores" maxWidth="max-w-2xl" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={onClose}>Cerrar</button></>}>
-                <div className="space-y-6">
-                    <div className="p-4 bg-gray-100/50 rounded-lg">
-                        <h4 className="font-semibold mb-2">Agregar Nuevo Instructor</h4>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                value={newInstructorName}
-                                onChange={(e) => setNewInstructorName(e.target.value)}
-                                placeholder="Nombre completo del instructor"
-                                className="border p-2 rounded-lg w-full"
-                            />
-                            <button onClick={handleAdd} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">Agregar</button>
-                        </div>
+            <Modal open={open} onClose={onClose} title="Gestión de Personal" footer={<button className="px-4 py-2 bg-slate-700 rounded-lg text-xs font-bold" onClick={onClose}>Cerrar</button>}>
+                <div className="space-y-4">
+                    <div className="flex gap-2">
+                        <input type="text" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nuevo instructor" className="p-3 bg-slate-900 border border-white/10 rounded-xl w-full text-sm"/>
+                        <button onClick={handleAdd} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Añadir</button>
                     </div>
-                    <div>
-                        <h4 className="font-semibold mb-2">Lista de Instructores</h4>
-                        <ul className="space-y-2">
-                            {instructores.map(instructor => (
-                                <li key={instructor.id} className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                                    {editingInstructor?.id === instructor.id ? (
-                                        <input
-                                            type="text"
-                                            value={editingInstructor.nombre}
-                                            onChange={(e) => setEditingInstructor({ ...editingInstructor, nombre: e.target.value })}
-                                            className="border p-1 rounded-lg w-full"
-                                        />
+                    <ul className="space-y-2">
+                        {instructores.map(i => (
+                            <li key={i.id} className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
+                                {editing?.id === i.id ? (
+                                    <input type="text" value={editing.nombre} onChange={e => setEditing({...editing, nombre: e.target.value})} className="bg-slate-800 border border-white/20 p-1 rounded w-full mr-2 text-white"/>
+                                ) : ( <span>{i.nombre}</span> )}
+                                <div className="flex gap-1">
+                                    {editing?.id === i.id ? (
+                                        <button onClick={() => { onEdit(editing.id, editing.nombre); setEditing(null); }} className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold">OK</button>
                                     ) : (
-                                        <span>{instructor.nombre}</span>
+                                        <>
+                                            <button onClick={() => setEditing(i)} className="px-3 py-1 bg-slate-600 text-white rounded text-xs font-bold">Editar</button>
+                                            <button onClick={() => {
+                                                if (legajos.some(l => l.instructorId === i.id)) onAlert('El instructor tiene legajos asignados.');
+                                                else onDelete(i.id);
+                                            }} className="px-3 py-1 bg-rose-600 text-white rounded text-xs font-bold">Borrar</button>
+                                        </>
                                     )}
-                                    <div className="space-x-2">
-                                        {editingInstructor?.id === instructor.id ? (
-                                            <>
-                                                <button onClick={handleUpdate} className="px-3 py-1 bg-green-500 text-white text-xs rounded-md">Guardar</button>
-                                                <button onClick={() => setEditingInstructor(null)} className="px-3 py-1 bg-gray-400 text-white text-xs rounded-md">Cancelar</button>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <button onClick={() => setEditingInstructor({ ...instructor })} className="px-3 py-1 bg-gray-200 text-xs rounded-md">Editar</button>
-                                                <button onClick={() => handleDelete(instructor)} className="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-md">Eliminar</button>
-                                            </>
-                                        )}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                </div>
-            </Modal>
-        );
-    }
-    // --- COMPONENTE: MODAL DE REPORTE DE SALIDAS ---
-    function ReporteSalidasModal({ open, onClose, legajos, onPrint }) {
-        const [selected, setSelected] = React.useState(new Set());
-        const [reportDate, setReportDate] = React.useState(dateToInputString(new Date()));
-        
-        const salidasEnFecha = React.useMemo(() => {
-            const targetDate = new Date(reportDate + 'T00:00:00'); // Asume fecha local
-            return legajos.filter(l => 
-                l.historial.some(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, targetDate))
-            );
-        }, [legajos, reportDate]);
-        React.useEffect(() => {
-            if(open) {
-                // Resetea la fecha a hoy y selecciona todos
-                const todayStr = dateToInputString(new Date());
-                setReportDate(todayStr);
-                const targetDate = new Date(todayStr + 'T00:00:00');
-                const legajosHoy = legajos.filter(l => 
-                    l.historial.some(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, targetDate))
-                );
-                setSelected(new Set(legajosHoy.map(l => l.id)));
-            }
-        }, [open, legajos]); // Depende de legajos por si se actualiza en fondo
-        React.useEffect(() => {
-            // Re-seleccionar todos cuando la fecha cambia
-            setSelected(new Set(salidasEnFecha.map(l => l.id)));
-        }, [salidasEnFecha]);
-        const handleToggle = (legajoId) => {
-            const newSet = new Set(selected);
-            if (newSet.has(legajoId)) newSet.delete(legajoId); else newSet.add(legajoId);
-            setSelected(newSet);
-        };
-        const handlePrint = () => {
-            const legajosToPrint = salidasEnFecha.filter(l => selected.has(l.id));
-            if (legajosToPrint.length === 0) return;
-            onPrint(legajosToPrint, new Date(reportDate + 'T00:00:00'));
-        };
-        return (
-            <Modal open={open} onClose={onClose} title="Reporte de Salidas" maxWidth="max-w-3xl"
-                footer={<>
-                    <button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={onClose}>Cerrar</button>
-                    <button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={handlePrint} disabled={selected.size === 0}>
-                        Generar Impresión ({selected.size})
-                    </button>
-                </>}>
-                <div className="mb-4">
-                    <label className="font-semibold text-gray-800">Seleccionar Fecha del Reporte</label>
-                    <input 
-                        type="date" 
-                        value={reportDate} 
-                        onChange={(e) => setReportDate(e.target.value)}
-                        className="border p-2 rounded-lg w-full mt-1"
-                    />
-                </div>
-                <div className="flex justify-between items-center mb-4">
-                    <p className="text-sm">Seleccione los legajos a incluir en el reporte:</p>
-                    <div className="space-x-2">
-                        <button onClick={() => setSelected(new Set(salidasEnFecha.map(l => l.id)))} className="px-3 py-1 bg-gray-200 text-xs rounded-md">Seleccionar Todos</button>
-                        <button onClick={() => setSelected(new Set())} className="px-3 py-1 bg-gray-200 text-xs rounded-md">Deseleccionar Todos</button>
-                    </div>
-                </div>
-                <ul className="space-y-2">
-                    {salidasEnFecha.length === 0 && <p className="text-gray-500 text-center p-4">No se registraron salidas en la fecha seleccionada.</p>}
-                    {salidasEnFecha.map(legajo => {
-                        const ultimoMovSalida = legajo.historial
-                            .filter(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, new Date(reportDate + 'T00:00:00')))
-                            .sort((a,b) => b.fecha.toMillis() - a.fecha.toMillis())[0];
-                        return (
-                            <li key={legajo.id} className="flex items-center p-2 bg-white/50 rounded-lg">
-                                <input 
-                                    type="checkbox" 
-                                    checked={selected.has(legajo.id)} 
-                                    onChange={() => handleToggle(legajo.id)}
-                                    className="h-5 w-5 mr-3"
-                                />
-                                <div>
-                                    <span className="font-semibold">{legajo.numero}</span> - {legajo.caratula}
-                                    <p className="text-xs text-gray-600">Destino: {ultimoMovSalida?.notas.replace('Enviado a ', '')}</p>
                                 </div>
                             </li>
-                        );
-                    })}
-                </ul>
+                        ))}
+                    </ul>
+                </div>
             </Modal>
         );
     }
-    // --- COMPONENTE: MODAL DE REPORTE DE ENTRADAS/FIRMAS ---
-    function ReporteEntradasModal({ open, onClose, legajos, onPrint }) {
+
+    function ReporteModal({ open, onClose, type, legajos, onPrint }) {
         const [selected, setSelected] = React.useState(new Set());
-        const [reportDate, setReportDate] = React.useState(dateToInputString(new Date()));
+        const [date, setDate] = React.useState(dateToInputString());
         
-        const entradasEnFecha = React.useMemo(() => {
-            const targetDate = new Date(reportDate + 'T00:00:00'); // Asume fecha local
-            return legajos.filter(l => 
-                l.historial.some(h => (h.tipo === 'ENTRADA' || h.tipo === 'CREACIÓN') && isSameDay(h.fecha, targetDate))
-            );
-        }, [legajos, reportDate]);
-        React.useEffect(() => {
-            if(open) {
-                const todayStr = dateToInputString(new Date());
-                setReportDate(todayStr);
-                const targetDate = new Date(todayStr + 'T00:00:00');
-                const legajosHoy = legajos.filter(l => 
-                    l.historial.some(h => (h.tipo === 'ENTRADA' || h.tipo === 'CREACIÓN') && isSameDay(h.fecha, targetDate))
-                );
-                setSelected(new Set(legajosHoy.map(l => l.id)));
-            }
-        }, [open, legajos]);
-        React.useEffect(() => {
-            setSelected(new Set(entradasEnFecha.map(l => l.id)));
-        }, [entradasEnFecha]);
-        const handleToggle = (legajoId) => {
-            const newSet = new Set(selected);
-            if (newSet.has(legajoId)) newSet.delete(legajoId); else newSet.add(legajoId);
-            setSelected(newSet);
-        };
-        const handlePrint = () => {
-            const legajosToPrint = entradasEnFecha.filter(l => selected.has(l.id));
-            if (legajosToPrint.length === 0) return;
-            onPrint(legajosToPrint, new Date(reportDate + 'T00:00:00'));
-        };
+        // --- MEJORA: Lógica de auditoría real ---
+        const filtered = React.useMemo(() => {
+            const target = new Date(date + 'T00:00:00');
+            return legajos.filter(l => l.historial.some(h => {
+                // Si es reporte de salidas, buscar SOLO tipos de movimiento 'SALIDA'
+                if (type === 'salidas') return h.tipo === 'SALIDA' && isSameDay(h.fecha, target);
+                // Si es reporte de entradas, buscar SOLO tipos de movimiento 'ENTRADA' 
+                // (Se quita 'CREACIÓN' para que no figuren archivos nuevos que aún no se han movido)
+                return h.tipo === 'ENTRADA' && isSameDay(h.fecha, target);
+            }));
+        }, [legajos, date, type]);
+
+        React.useEffect(() => { if(open) setSelected(new Set(filtered.map(l => l.id))); }, [open, filtered]);
+        
         return (
-            <Modal open={open} onClose={onClose} title="Reporte de Entradas para Firma" maxWidth="max-w-3xl"
-                footer={<>
-                    <button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={onClose}>Cerrar</button>
-                    <button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={handlePrint} disabled={selected.size === 0}>
-                        Generar Planilla ({selected.size})
-                    </button>
-                </>}>
-                <div className="mb-4">
-                    <label className="font-semibold text-gray-800">Seleccionar Fecha del Reporte</label>
-                    <input 
-                        type="date" 
-                        value={reportDate} 
-                        onChange={(e) => setReportDate(e.target.value)}
-                        className="border p-2 rounded-lg w-full mt-1"
-                    />
-                </div>
-                <div className="flex justify-between items-center mb-4">
-                    <p className="text-sm">Seleccione los legajos a incluir en la planilla de firmas:</p>
-                    <div className="space-x-2">
-                        <button onClick={() => setSelected(new Set(entradasEnFecha.map(l => l.id)))} className="px-3 py-1 bg-gray-200 text-xs rounded-md">Seleccionar Todos</button>
-                        <button onClick={() => setSelected(new Set())} className="px-3 py-1 bg-gray-200 text-xs rounded-md">Deseleccionar Todos</button>
-                    </div>
-                </div>
-                <ul className="space-y-2">
-                    {entradasEnFecha.length === 0 && <p className="text-gray-500 text-center p-4">No se registraron entradas ni creaciones en la fecha seleccionada.</p>}
-                    {entradasEnFecha.map(legajo => (
-                        <li key={legajo.id} className="flex items-center p-2 bg-white/50 rounded-lg">
-                            <input 
-                                type="checkbox" 
-                                checked={selected.has(legajo.id)} 
-                                onChange={() => handleToggle(legajo.id)}
-                                className="h-5 w-5 mr-3"
-                            />
-                            <div>
-                                <span className="font-semibold">{legajo.numero}</span> - {legajo.caratula}
-                                <p className="text-xs text-gray-600">Instructor: {legajo.instructorNombre || 'Sin Asignar'}</p>
-                            </div>
-                        </li>
+            <Modal open={open} onClose={onClose} title={type === 'salidas' ? "Libro de Salidas" : "Libro de Entradas"} footer={<><button onClick={onClose} className="px-4 py-2 bg-slate-700 rounded-lg text-xs font-bold">Cerrar</button><button onClick={() => onPrint(filtered.filter(l => selected.has(l.id)), new Date(date + 'T00:00:00'))} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold" disabled={selected.size === 0}>Generar ({selected.size})</button></>}>
+                <div className="mb-4"><label className="text-[10px] font-black uppercase text-slate-500 mb-1 block tracking-widest">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white outline-none"/></div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {filtered.map(l => (
+                        <div key={l.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5">
+                            <input type="checkbox" checked={selected.has(l.id)} onChange={() => { const s = new Set(selected); if(s.has(l.id)) s.delete(l.id); else s.add(l.id); setSelected(s); }} className="w-4 h-4 rounded border-slate-700 bg-slate-800"/>
+                            <div className="text-sm text-slate-200"><strong>{l.numero}</strong> - {l.caratula}</div>
+                        </div>
                     ))}
-                </ul>
+                    {filtered.length === 0 && <p className="text-center py-6 text-slate-500 italic">No hay movimientos registrados para esta fecha.</p>}
+                </div>
             </Modal>
         );
     }
-    
+
     // =======================================================
-    //  COMPONENTE DE LA APLICACIÓN PRINCIPAL (CONECTADO A FIREBASE)
+    //  APLICACIÓN PRINCIPAL
     // =======================================================
     function GestorDeLegajos({ user, onSignOut }) {
         const [legajos, setLegajos] = React.useState([]);
         const [deletedLegajos, setDeletedLegajos] = React.useState([]);
         const [instructores, setInstructores] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
-        const [error, setError] = React.useState(null);
         const [q, setQ] = React.useState("");
         const [current, setCurrent] = React.useState(null);
-        const [showNew, setShowNew] = React.useState(false);
-        const [showSalida, setShowSalida] = React.useState(false);
-        const [showEdit, setShowEdit] = React.useState(false);
-        const [showHist, setShowHist] = React.useState(false);
-        const [showBarcode, setShowBarcode] = React.useState(false);
-        const [showDeletedLog, setShowDeletedLog] = React.useState(false);
-        const [showInstructores, setShowInstructores] = React.useState(false);
-        const [showReporteSalidas, setShowReporteSalidas] = React.useState(false);
-        const [showReporteEntradas, setShowReporteEntradas] = React.useState(false);
-        const [newForm, setNewForm] = React.useState({ numero: "", caratula: "", instructorId: "" });
-        const [editForm, setEditForm] = React.useState({ id: null, numero: "", caratula: "", vencimiento: "", instructorId: "", ubicacionActual: "" });
-        const [salidaForm, setSalidaForm] = React.useState({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" });
-        const [confirmation, setConfirmation] = React.useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
-        const [alertModal, setAlertModal] = React.useState({ isOpen: false, title: '', message: '' });
+        const [barcodeActive, setBarcodeActive] = React.useState(true);
         const [scanned, setScanned] = React.useState(false);
-        const [barcodeListenerActive, setBarcodeListenerActive] = React.useState(true);
-        const [highlightedLegajoId, setHighlightedLegajoId] = React.useState(null);
+        const [highlightedId, setHighlightedId] = React.useState(null);
         const [filtroVencidos, setFiltroVencidos] = React.useState(false);
+        
+        // Estados Modales
+        const [modals, setModals] = React.useState({ 
+            new: false, edit: false, salida: false, history: false, 
+            barcode: false, trash: false, inst: false, repSal: false, repEnt: false 
+        });
+        const toggleModal = (key, val) => setModals(prev => ({ ...prev, [key]: val }));
+
+        // Formularios
+        const [newForm, setNewForm] = React.useState({ numero: "", caratula: "", instructorId: "" });
+        const [editForm, setEditForm] = React.useState({ id: null, numero: "", caratula: "", instructorId: "", vencimiento: "", ubicacionActual: "" });
+        const [salidaForm, setSalidaForm] = React.useState({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" });
+        
+        const [confirm, setConfirm] = React.useState({ open: false, title: '', msg: '', onOk: null, color: "bg-blue-600" });
+        const [alertState, setAlertState] = React.useState({ open: false, title: '', msg: '' });
+
         const legajoRefs = React.useRef({});
+
         React.useEffect(() => {
-            const unsubscribeLegajos = legajosCollectionRef.orderBy("createdAt", "desc").onSnapshot(snapshot => {
-                setLegajos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                setError(null);
+            const unsubLegs = legajosCollectionRef.orderBy("createdAt", "desc").onSnapshot(snap => {
+                setLegajos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 setLoading(false);
-            }, err => { 
-                console.error("Error al leer legajos:", err); 
-                setError("No se pudieron cargar los legajos. Verifique las reglas de seguridad y los índices de Firestore.");
-                setLoading(false); 
             });
-            const unsubscribeDeleted = deletedCollectionRef.orderBy("deletedAt", "desc").onSnapshot(snapshot => {
-                setDeletedLegajos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }, err => console.error("Error al leer eliminados:", err));
-            const unsubscribeInstructores = instructoresCollectionRef.orderBy("nombre", "asc").onSnapshot(snapshot => {
-                setInstructores(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }, err => console.error("Error al leer instructores:", err));
-            return () => { 
-                unsubscribeLegajos(); 
-                unsubscribeDeleted();
-                unsubscribeInstructores();
-            };
+            const unsubDels = deletedCollectionRef.orderBy("deletedAt", "desc").onSnapshot(snap => setDeletedLegajos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+            const unsubInst = instructoresCollectionRef.orderBy("nombre", "asc").onSnapshot(snap => setInstructores(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+            return () => { unsubLegs(); unsubDels(); unsubInst(); };
         }, []);
-        const legajosVencidos = React.useMemo(() => {
-            return legajos.filter(isOverdue);
-        }, [legajos]);
+
+        const legajosVencidos = React.useMemo(() => legajos.filter(isOverdue), [legajos]);
+        const filteredLegajos = React.useMemo(() => {
+            const base = filtroVencidos ? legajosVencidos : legajos;
+            const term = q.trim().toLowerCase();
+            return term ? base.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term)) : base;
+        }, [legajos, q, filtroVencidos, legajosVencidos]);
+
+        // Manejador del Escáner
         React.useEffect(() => {
-            if (q === '') {
-                setHighlightedLegajoId(null);
-            }
-        }, [q]);
-        React.useEffect(() => {
-            let barcode = '';
-            let lastKeyTime = 0;
-            const handleKeyDown = (e) => {
-                if (!barcodeListenerActive || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-                const currentTime = Date.now();
-                if (currentTime - lastKeyTime > 100) barcode = '';
-                
+            let buffer = ''; let last = 0;
+            const handleKey = (e) => {
+                if (!barcodeActive || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+                const now = Date.now();
+                if (now - last > 100) buffer = '';
                 if (e.key === 'Enter') {
-                    if (barcode.length > 3) {
-                        const correctedBarcode = barcode.replace(/-/g, '/');
-                        const foundLegajo = legajos.find(l => l.numero === correctedBarcode);
-                        if (foundLegajo) {
-                            setQ(correctedBarcode);
-                            setScanned(true);
-                            setHighlightedLegajoId(foundLegajo.id);
-                            if (filtroVencidos) setFiltroVencidos(false); // Clear overdue filter on scan
-                            setTimeout(() => {
-                                legajoRefs.current[foundLegajo.id]?.scrollIntoView({
-                                    behavior: 'smooth',
-                                    block: 'center'
-                                });
-                            }, 100);
-                            setTimeout(() => setScanned(false), 1000);
+                    if (buffer.length > 3) {
+                        const clean = buffer.replace(/-/g, '/');
+                        const found = legajos.find(l => l.numero === clean);
+                        if (found) {
+                            setQ(clean); setScanned(true); setHighlightedId(found.id);
+                            if (filtroVencidos) setFiltroVencidos(false);
+                            setTimeout(() => legajoRefs.current[found.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                            setTimeout(() => { setQ(''); setScanned(false); setHighlightedId(null); }, 3000);
                         } else {
-                            setQ(correctedBarcode);
-                            setAlertModal({ isOpen: true, title: 'No Encontrado', message: `No se encontró ningún legajo con el número "${correctedBarcode}".`});
-                            setTimeout(() => setQ(''), 2000);
+                            setAlertState({ open: true, title: 'No Encontrado', msg: `Legajo "${clean}" no hallado.` });
                         }
                     }
-                    barcode = '';
-                } else if (e.key.length === 1) {
-                    barcode += e.key;
-                }
-                lastKeyTime = currentTime;
+                    buffer = '';
+                } else if (e.key.length === 1) buffer += e.key;
+                last = now;
             };
-            window.addEventListener('keydown', handleKeyDown);
-            return () => window.removeEventListener('keydown', handleKeyDown);
-        }, [legajos, barcodeListenerActive, filtroVencidos]);
-        const filteredLegajos = React.useMemo(() => { 
-            const baseLegajos = filtroVencidos ? legajosVencidos : legajos;
-            const term = q.trim().toLowerCase(); 
-            if (!term) return baseLegajos; 
-            return baseLegajos.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term)); 
-        }, [legajos, q, filtroVencidos, legajosVencidos]);
-        
-        const handleConfirmation = (conf) => setConfirmation({ ...conf, isOpen: true });
-        const closeConfirmation = () => setConfirmation({ isOpen: false });
-        function handleAbrirBarcode(legajo) { setCurrent(legajo); setShowBarcode(true); }
-        
-        async function crearLegajo() {
-            const numeroTrimmed = newForm.numero.trim();
-            if (!validateNumeroExpediente(numeroTrimmed)) { setAlertModal({ isOpen: true, title: 'Formato Inválido', message: 'El formato del N° de legajo no es válido.' }); return; }
-            if (!newForm.caratula.trim()) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'La carátula no puede estar vacía.' }); return; }
-            
-            const snapshot = await legajosCollectionRef.where("numero", "==", numeroTrimmed).get();
-            if (!snapshot.empty) { setAlertModal({ isOpen: true, title: 'Legajo Duplicado', message: `El número de legajo "${numeroTrimmed}" ya existe.` }); return; }
-            
-            handleConfirmation({ title: 'Confirmar Creación', message: '¿Estás seguro de que deseas crear este nuevo legajo?', onConfirm: async () => { 
-                const instructor = instructores.find(i => i.id === newForm.instructorId);
-                const nuevoHistorial = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado en el sistema.', usuario: user.email };
-                const nuevoLegajoData = { 
-                    numero: numeroTrimmed, 
-                    caratula: newForm.caratula.trim(), 
-                    instructorId: newForm.instructorId || null,
-                    instructorNombre: instructor ? instructor.nombre : "Sin Asignar",
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(), 
-                    enTransito: false, 
-                    ubicacionActual: { lugar: "Juzgado", desde: new Date() }, 
-                    vencimiento: null, 
-                    historial: [nuevoHistorial] 
-                };
-                try {
-                    const docRef = await legajosCollectionRef.add(nuevoLegajoData);
-                    setShowNew(false);
-                    setNewForm({ numero: "", caratula: "", instructorId: "" });
-                    closeConfirmation();
-                    handleAbrirBarcode({ id: docRef.id, ...nuevoLegajoData, createdAt: new Date() });
-                } catch (e) { console.error("Error al crear:", e); setAlertModal({ isOpen: true, title: 'Error', message: 'No se pudo crear el legajo.' }); }
-            }, confirmText: 'Sí, Crear', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
-        }
-        async function editarLegajo() {
-            if (!editForm.id) return;
-            const numeroTrimmed = editForm.numero.trim();
-            if (!validateNumeroExpediente(numeroTrimmed)) { setAlertModal({ isOpen: true, title: 'Formato Inválido', message: 'El formato del N° de legajo no es válido.' }); return; }
-            if (!editForm.caratula.trim()) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'La carátula no puede estar vacía.' }); return; }
-            const snapshot = await legajosCollectionRef.where("numero", "==", numeroTrimmed).get();
-            if (!snapshot.empty && snapshot.docs[0].id !== editForm.id) { setAlertModal({ isOpen: true, title: 'Legajo Duplicado', message: `El número "${numeroTrimmed}" ya pertenece a otro expediente.` }); return; }
-            
-            handleConfirmation({ title: 'Confirmar Modificación', message: '¿Deseas guardar los cambios?', onConfirm: async () => {
-                const legajoDocRef = legajosCollectionRef.doc(editForm.id); const docSnap = await legajoDocRef.get(); const legajoActual = docSnap.data();
-                const instructor = instructores.find(i => i.id === editForm.instructorId);
-                const newUbicacionLugar = editForm.ubicacionActual.trim();
-                let changes = [];
-                let updateData = {};
-                if (legajoActual.numero !== editForm.numero.trim()) {
-                    changes.push(`N° cambiado a "${editForm.numero.trim()}"`);
-                    updateData.numero = editForm.numero.trim();
-                }
-                if (legajoActual.caratula !== editForm.caratula.trim()) {
-                    changes.push(`Carátula modificada`);
-                    updateData.caratula = editForm.caratula.trim();
-                }
-                if (legajoActual.instructorId !== editForm.instructorId) {
-                    changes.push(`Instructor cambiado a "${instructor ? instructor.nombre : 'Sin Asignar'}"`);
-                    updateData.instructorId = editForm.instructorId || null;
-                    updateData.instructorNombre = instructor ? instructor.nombre : "Sin Asignar";
-                }
-                if (legajoActual.ubicacionActual.lugar !== newUbicacionLugar) {
-                    changes.push(`Ubicación corregida manualmente a "${newUbicacionLugar}" por ${user.email}`);
-                    updateData['ubicacionActual.lugar'] = newUbicacionLugar; // Usar notación de punto para actualizar objeto anidado
-                }
-                
-                const newVencimiento = editForm.vencimiento ? new Date(editForm.vencimiento) : null;
-                if (legajoActual.enTransito) { 
-                    const oldVencimientoMs = legajoActual.vencimiento ? legajoActual.vencimiento.toMillis() : null; 
-                    const newVencimientoMs = newVencimiento ? newVencimiento.getTime() : null; 
-                    if (oldVencimientoMs !== newVencimientoMs) {
-                        changes.push(`Vencimiento actualizado a ${fmtDateTime(newVencimiento)}`);
-                        updateData.vencimiento = newVencimiento;
-                    }
-                }
-                if (changes.length > 0) { 
-                    const notasHistorial = changes.join('. '); 
-                    const nuevoHistorial = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: notasHistorial, usuario: user.email }; 
-                    updateData.historial = firebase.firestore.FieldValue.arrayUnion(nuevoHistorial);
-                    await legajoDocRef.update(updateData); 
-                }
-                setShowEdit(false); 
-                closeConfirmation();
-            }, confirmText: 'Guardar', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
-        }
-        function registrarEntrada(legajoId) {
-            handleConfirmation({ title: 'Confirmar Entrada', message: '¿Confirmas el reingreso al Juzgado?', onConfirm: async () => {
-                const nuevoHistorial = { id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email };
-                await legajosCollectionRef.doc(legajoId).update({ enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: firebase.firestore.FieldValue.arrayUnion(nuevoHistorial) });
-                closeConfirmation();
-            }, confirmText: 'Registrar', confirmColor: 'bg-green-600 hover:bg-green-700' });
-        }
-        function registrarSalida() {
-            if (!current) return;
-            const dependenciaFinal = salidaForm.dependencia === 'Otra' ? salidaForm.otraDependencia.trim() : salidaForm.dependencia;
-            if (!dependenciaFinal) { setAlertModal({ isOpen: true, title: 'Campo Obligatorio', message: 'Debe especificar una dependencia.' }); return; }
-            handleConfirmation({ title: 'Confirmar Salida', message: `¿Confirmas el envío a "${dependenciaFinal}"?`, onConfirm: async () => {
-                const now = new Date(); const venc = salidaForm.plazoDias ? addDays(now, salidaForm.plazoDias) : null;
-                const nuevoHistorial = { id: uid(), tipo: 'SALIDA', fecha: now, notas: `Enviado a ${dependenciaFinal}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc, usuario: user.email };
-                await legajosCollectionRef.doc(current.id).update({ enTransito: true, ubicacionActual: { lugar: dependenciaFinal, desde: now }, vencimiento: venc, historial: firebase.firestore.FieldValue.arrayUnion(nuevoHistorial) });
-                setShowSalida(false); closeConfirmation();
-            }, confirmText: 'Registrar Salida', confirmColor: 'bg-blue-600 hover:bg-blue-700' });
-        }
-        
-        function eliminarLegajo(legajoId) {
-            handleConfirmation({ title: '¿Enviar a Papelera?', message: 'El legajo se moverá al registro de eliminados. ¿Continuar?', onConfirm: async () => {
-                const legajoDocRef = legajosCollectionRef.doc(legajoId); const doc = await legajoDocRef.get();
-                if (doc.exists) { const legajoData = doc.data(); const deletionRecord = { ...legajoData, deletedAt: new Date(), deletedBy: user.email }; deletionRecord.historial.unshift({ id: uid(), tipo: 'ELIMINACIÓN', fecha: new Date(), notas: 'Movido a papelera.', usuario: user.email }); await deletedCollectionRef.doc(legajoId).set(deletionRecord); await legajoDocRef.delete(); }
-                closeConfirmation();
-            }, confirmText: 'Sí, Enviar', confirmColor: 'bg-yellow-600 hover:bg-yellow-700' });
-        }
-        async function restoreLegajo(legajoId) {
-            const deletedDocRef = deletedCollectionRef.doc(legajoId); const doc = await deletedDocRef.get();
-            if (doc.exists) { const { deletedAt, deletedBy, ...restoredData } = doc.data(); restoredData.historial.unshift({ id: uid(), tipo: 'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado desde papelera.', usuario: user.email }); await legajosCollectionRef.doc(legajoId).set(restoredData); await deletedDocRef.delete(); }
-        }
-        function permanentlyDeleteLegajo(legajoId) {
-            handleConfirmation({ title: '¡Eliminación Permanente!', message: 'Esta acción es IRREVERSIBLE. ¿Estás seguro?', onConfirm: async () => { await deletedCollectionRef.doc(legajoId).delete(); closeConfirmation(); }, confirmText: 'Sí, Eliminar PERMANENTEMENTE' });
-        }
-        async function addInstructor(nombre) { await instructoresCollectionRef.add({ nombre }); }
-        async function editInstructor(id, nombre) { await instructoresCollectionRef.doc(id).update({ nombre }); }
-        async function deleteInstructor(id) { await instructoresCollectionRef.doc(id).delete(); }
-        
-        const handlePrintSalidas = (legajosToPrint, date) => {
-            const printWindow = window.open('', '', 'height=800,width=800');
-            const reportDateStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            printWindow.document.write('<html><head><title>Reporte de Salidas</title>');
-            printWindow.document.write(`<style>
-                @page { size: A4; margin: 2cm; }
-                body { font-family: sans-serif; }
-                .header { text-align: center; position: relative; margin-bottom: 2rem; }
-                .header h1 { margin: 0; font-size: 1.2rem; }
-                .header p { margin: 0; font-size: 0.9rem; position: absolute; top: 0; right: 0; }
-                table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-                th, td { border: 1px solid #000; padding: 8px; text-align: left; vertical-align: top; }
-                th { background-color: #f0f0f0; }
-                tr { min-height: 90px; }
-                td { height: 90px; }
-                .col-sello { width: 25%; }
-                .col-firma { width: 25%; }
-            </style>`);
-            printWindow.document.write('</head><body>');
-            printWindow.document.write('<div class="header">');
-            printWindow.document.write('<h1>Juzgado de Ejecución Penal N° 2</h1>');
-            printWindow.document.write(`<p>Fecha: ${reportDateStr}</p>`);
-            printWindow.document.write('</div>');
-            printWindow.document.write('<h2>Reporte de Salidas</h2>');
-            printWindow.document.write('<table>');
-            printWindow.document.write(`<thead><tr>
-                <th>Legajo N°</th>
-                <th>Carátula</th>
-                <th>Destino</th>
-                <th class="col-sello">Sello Dependencia</th>
-                <th class="col-firma">Firma Responsable</th>
-            </tr></thead>`);
-            printWindow.document.write('<tbody>');
-            legajosToPrint.forEach(legajo => {
-                const ultimoMovSalida = legajo.historial.find(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, date));
-                const destino = ultimoMovSalida?.notas.replace('Enviado a ', '') || 'N/D';
-                printWindow.document.write(`<tr>
-                    <td>${legajo.numero}</td>
-                    <td>${legajo.caratula}</td>
-                    <td>${destino}</td>
-                    <td></td>
-                    <td></td>
-                </tr>`);
+            window.addEventListener('keydown', handleKey);
+            return () => window.removeEventListener('keydown', handleKey);
+        }, [legajos, barcodeActive, filtroVencidos]);
+
+        const handleConfirm = (title, msg, onOk, color = "bg-blue-600") => setConfirm({ open: true, title, msg, onOk, color });
+
+        // --- ACCIONES ---
+        const onCrearLegajo = async () => {
+            const num = newForm.numero.trim();
+            if (!validateNumeroExpediente(num)) return setAlertState({ open: true, title: "Error", msg: "Formato de N° inválido." });
+            handleConfirm("Crear Legajo", "¿Desea dar de alta este expediente?", async () => {
+                const inst = instructores.find(i => i.id === newForm.instructorId);
+                const hist = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado.', usuario: user.email };
+                await legajosCollectionRef.add({
+                    numero: num, caratula: newForm.caratula.trim(), 
+                    instructorId: newForm.instructorId || null, instructorNombre: inst ? inst.nombre : "Sin Asignar",
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(), enTransito: false,
+                    ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: [hist]
+                });
+                toggleModal('new', false); setNewForm({numero:"", caratula:"", instructorId:""});
+                setConfirm({ ...confirm, open: false });
             });
-            printWindow.document.write('</tbody></table>');
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-            setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
-        };
-        const handlePrintEntradas = (legajosToPrint, date) => {
-            const printWindow = window.open('', '', 'height=800,width=800');
-            const reportDateStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            printWindow.document.write('<html><head><title>Reporte de Entradas</title>');
-            printWindow.document.write(`<style>
-                @page { size: A4; margin: 2cm; }
-                body { font-family: sans-serif; }
-                .header { text-align: center; position: relative; margin-bottom: 2rem; }
-                .header h1 { margin: 0; font-size: 1.2rem; }
-                .header p { margin: 0; font-size: 0.9rem; position: absolute; top: 0; right: 0; }
-                table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-                th, td { border: 1px solid #000; padding: 10px; text-align: left; }
-                th { background-color: #f0f0f0; }
-                .col-firma { width: 25%; }
-                .col-fecha { width: 20%; }
-            </style>`);
-            printWindow.document.write('</head><body>');
-            printWindow.document.write('<div class="header">');
-            printWindow.document.write('<h1>Juzgado de Ejecución Penal N° 2</h1>');
-            printWindow.document.write(`<p>Fecha: ${reportDateStr}</p>`);
-            printWindow.document.write('</div>');
-            printWindow.document.write('<h2>Planilla de Recepción de Legajos</h2>');
-            printWindow.document.write('<table>');
-            printWindow.document.write('<thead><tr><th>Legajo N°</th><th>Carátula</th><th>Instructor Asignado</th><th class="col-fecha">Fecha de Recepción</th><th class="col-firma">Firma</th></tr></thead>');
-            printWindow.document.write('<tbody>');
-            legajosToPrint.forEach(legajo => {
-                printWindow.document.write(`<tr>
-                    <td>${legajo.numero}</td>
-                    <td>${legajo.caratula}</td>
-                    <td>${legajo.instructorNombre || 'Sin Asignar'}</td>
-                    <td></td>
-                    <td></td>
-                </tr>`);
-            });
-            printWindow.document.write('</tbody></table>');
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-            setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
         };
 
-        // --- NUEVA FUNCIÓN: IMPRIMIR VISTA FILTRADA ---
-        const handlePrintVistaActual = () => {
-            const printWindow = window.open('', '', 'height=800,width=900');
-            const todayStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            let subtitulo = filtroVencidos ? "Legajos Vencidos" : "Listado de Legajos";
-            if (q) subtitulo += ` (Filtro: "${q}")`;
+        const onEditarLegajo = async () => {
+            handleConfirm("Guardar Cambios", "¿Confirmas la modificación?", async () => {
+                const inst = instructores.find(i => i.id === editForm.instructorId);
+                const hist = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados por ${user.email}.`, usuario: user.email };
+                await legajosCollectionRef.doc(editForm.id).update({
+                    numero: editForm.numero.trim(), caratula: editForm.caratula.trim(),
+                    instructorId: editForm.instructorId || null, instructorNombre: inst ? inst.nombre : "Sin Asignar",
+                    'ubicacionActual.lugar': editForm.ubicacionActual.trim(),
+                    vencimiento: editForm.vencimiento ? new Date(editForm.vencimiento) : null,
+                    historial: firebase.firestore.FieldValue.arrayUnion(hist)
+                });
+                toggleModal('edit', false); setConfirm({ ...confirm, open: false });
+            });
+        };
 
-            printWindow.document.write(`<html><head><title>Imprimir Vista</title>
-            <style>
-                @page { size: A4; margin: 1.5cm; }
-                body { font-family: sans-serif; font-size: 10pt; color: #333; }
-                .header { text-align: center; border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; }
-                .header h1 { margin: 0; font-size: 1.4rem; text-transform: uppercase; }
-                .date-header { text-align: right; margin-bottom: 5px; font-weight: bold; }
-                table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                th, td { border: 1px solid #000; padding: 6px; text-align: left; word-break: break-word; }
-                th { background-color: #f2f2f2; font-size: 9pt; text-transform: uppercase; }
-                .vencido { color: red; font-weight: bold; }
-            </style></head><body>
-            <div class="date-header">Fecha: ${todayStr}</div>
-            <div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><h3>${subtitulo}</h3></div>
-            <table><thead><tr><th>N° Legajo</th><th>Carátula</th><th>Instructor</th><th>Ubicación</th><th>Vencimiento</th><th>Estado</th></tr></thead><tbody>`);
-            
+        const onEliminar = (id) => {
+            handleConfirm("Eliminar Legajo", "El expediente se moverá a la papelera.", async () => {
+                const doc = await legajosCollectionRef.doc(id).get();
+                if(doc.exists) {
+                    await deletedCollectionRef.doc(id).set({ ...doc.data(), deletedAt: new Date(), deletedBy: user.email });
+                    await legajosCollectionRef.doc(id).delete();
+                }
+                setConfirm({ ...confirm, open: false });
+            }, "bg-rose-600");
+        };
+
+        // --- IMPRESIONES ---
+        const handlePrintSalidas = (list, date) => {
+            const win = window.open('', '', 'height=800,width=800');
+            const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+            win.document.write(`<html><head><title>Reporte Salidas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left;vertical-align:top}th{background-color:#f2f2f2;font-size:0.8rem}tr{height:95px}.col-fixed{width:20%}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Reporte de Salidas Diario</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Destino</th><th class="col-fixed">Sello Dependencia</th><th class="col-fixed">Firma Responsable</th></tr></thead><tbody>`);
+            list.forEach(l => {
+                const move = l.historial.find(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, date));
+                win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Destino: ${move?.notas.replace('Enviado a ','') || 'N/D'}</small></td><td></td><td></td></tr>`);
+            });
+            win.document.write('</tbody></table></body></html>'); win.document.close();
+            setTimeout(() => { win.print(); win.close(); }, 400);
+        };
+
+        const handlePrintEntradas = (list, date) => {
+            const win = window.open('', '', 'height=800,width=800');
+            const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+            win.document.write(`<html><head><title>Planilla Entradas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left}th{background-color:#f2f2f2}tr{height:60px}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Planilla de Recepción</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Instructor</th><th>Fecha Recepción</th><th>Firma</th></tr></thead><tbody>`);
+            list.forEach(l => { win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Instructor: ${l.instructorNombre}</small></td><td></td><td></td></tr>`); });
+            win.document.write('</tbody></table></body></html>'); win.document.close();
+            setTimeout(() => { win.print(); win.close(); }, 400);
+        };
+
+        const handlePrintVista = () => {
+            const win = window.open('', '', 'height=800,width=900');
+            const dStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+            const sub = filtroVencidos ? "Legajos Vencidos" : "Listado Filtrado";
+            win.document.write(`<html><head><title>Vista Impresa</title><style>@page{size:A4;margin:1.5cm}body{font-family:sans-serif;font-size:10pt;color:#111}.h{text-align:center;border-bottom:2px solid #000;margin-bottom:20px;padding-bottom:10px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #000;padding:7px;text-align:left}th{background:#f0f0f0;text-transform:uppercase;font-size:8pt}.vencido{color:red;font-weight:bold}</style></head><body><div style="text-align:right">Fecha: ${dStr}</div><div class="h"><h1>Juzgado de Ejecución Penal N° 2</h1><h3>${sub} ${q ? `(Filtro: "${q}")` : ''}</h3></div><table><thead><tr><th>N°</th><th>Carátula</th><th>Instructor</th><th>Ubicación</th><th>Vencimiento</th><th>Estado</th></tr></thead><tbody>`);
             filteredLegajos.forEach(l => {
-                const overdue = isOverdue(l);
-                const estado = overdue ? "Vencido" : l.enTransito ? "En Tránsito" : "En Juzgado";
-                printWindow.document.write(`<tr>
-                    <td>${l.numero}</td>
-                    <td>${l.caratula}</td>
-                    <td>${l.instructorNombre || 'Sin Asignar'}</td>
-                    <td>${l.ubicacionActual?.lugar || 'N/D'}</td>
-                    <td>${fmtDateTime(l.vencimiento)}</td>
-                    <td class="${overdue ? 'vencido' : ''}">${estado}</td>
-                </tr>`);
+                const over = isOverdue(l);
+                win.document.write(`<tr><td>${l.numero}</td><td>${l.caratula}</td><td>${l.instructorNombre}</td><td>${l.ubicacionActual?.lugar}</td><td>${fmtDateTime(l.vencimiento)}</td><td>${over ? 'VENCIDO' : l.enTransito ? 'TRÁNSITO' : 'JUZGADO'}</td></tr>`);
             });
-            
-            printWindow.document.write('</tbody></table></body></html>');
-            printWindow.document.close();
-            setTimeout(() => { printWindow.print(); printWindow.close(); }, 300);
+            win.document.write('</tbody></table></body></html>'); win.document.close();
+            setTimeout(() => { win.print(); win.close(); }, 400);
         };
 
-        function handleAbrirSalida(legajo) { setCurrent(legajo); setSalidaForm({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" }); setShowSalida(true); }
-        function handleAbrirEdit(legajo) { setCurrent(legajo); setEditForm({ id: legajo.id, numero: legajo.numero, caratula: legajo.caratula, instructorId: legajo.instructorId || "", ubicacionActual: legajo.ubicacionActual?.lugar || "", vencimiento: legajo.enTransito ? dateToInputFormat(legajo.vencimiento) : '' }); setShowEdit(true); }
-        function handleVerHistorial(legajo) { setCurrent(legajo); setShowHist(true); }
         return (
-            <div>
+            <div className="min-h-screen pb-12">
                 <BackgroundGradientAnimation />
-                <div className="relative z-10 min-h-screen">
-                    <header className="bg-white/70 backdrop-blur-sm border-b border-white/30 p-4 flex flex-col md:flex-row justify-between md:items-center gap-4 sticky top-0 z-20 shadow-md">
-                        <div>
-                            <h1 className="text-xl text-center md:text-left md:text-3xl font-bold bg-clip-text text-transparent drop-shadow-lg bg-gradient-to-b from-gray-700 to-gray-900">Gestión de Legajos EESS - JUZGADO DE EJECUCION PENAL N° 2</h1>
-                             <div className="text-center md:text-left mt-2">
-                                <p className="text-xs text-gray-600">Sesión iniciada: {user.email}</p>
-                                <p className="text-xs text-gray-500 italic mt-1">CREATE BY RBM 2025</p>
+                <div className="relative z-10">
+                    <header className="glass-panel border-b border-white/10 p-4 mb-6 sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-900/40">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 0 1 12 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" /></svg>
+                                </div>
+                                <div>
+                                    <h1 className="text-xl md:text-2xl font-extrabold text-white tracking-tight leading-none mb-1">EESS Dashboard</h1>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">Juzgado de Ejecución Penal N° 2</p>
+                                </div>
                             </div>
-                             {legajosVencidos.length > 0 && (
-                                <button 
-                                    onClick={() => setFiltroVencidos(true)}
-                                    className="mt-3 flex items-center gap-2 p-2 bg-red-100 text-red-700 rounded-lg shadow-md animate-pulse hover:animate-none hover:bg-red-200 transition-colors w-full justify-center md:w-auto"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                                    <span className="font-bold text-sm">{legajosVencidos.length} Legajo(s) Vencido(s)</span>
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center flex-wrap gap-2 md:gap-4 justify-center">
-                             <button className="px-3 py-2 bg-white/80 text-gray-700 rounded-lg shadow-lg hover:bg-gray-200 transition relative" onClick={() => setShowDeletedLog(true)} title="Registro de Eliminados (Admin)">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                                {deletedLegajos.length > 0 && <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">{deletedLegajos.length}</span>}
-                            </button>
-                            <div className="flex gap-2">
-                                <button className="px-3 py-2 bg-green-100 text-green-800 text-xs rounded-lg shadow-lg hover:bg-green-200 transition" onClick={() => setShowReporteEntradas(true)}>Reporte Entradas</button>
-                                <button className="px-3 py-2 bg-blue-100 text-blue-800 text-xs rounded-lg shadow-lg hover:bg-blue-200 transition" onClick={() => setShowReporteSalidas(true)}>Reporte Salidas</button>
+                            <div className="flex items-center gap-3">
+                                <div className="text-right hidden sm:block border-r border-white/10 pr-4">
+                                    <p className="text-xs font-semibold text-slate-300 leading-none mb-1">{user.email}</p>
+                                    <button onClick={onSignOut} className="text-[10px] text-rose-400 font-bold hover:text-rose-300 uppercase tracking-widest">Salir</button>
+                                </div>
+                                {legajosVencidos.length > 0 && (
+                                    <button onClick={() => setFiltroVencidos(true)} className="flex items-center gap-2 px-3 py-2 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl animate-pulse hover:bg-rose-500/30">
+                                        <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
+                                        <span className="text-xs font-bold">{legajosVencidos.length} VENCIDOS</span>
+                                    </button>
+                                )}
                             </div>
-                            <button className="px-4 py-2 bg-purple-600 text-white rounded-lg shadow-lg hover:bg-purple-700 transition" onClick={() => setShowInstructores(true)}> 👥  Instructores</button>
-                            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition" onClick={() => setShowNew(true)}> ➕  Nuevo</button>
-                            <button className="text-sm font-bold text-gray-700 hover:text-red-600" onClick={onSignOut}>Cerrar Sesión</button>
                         </div>
                     </header>
-                    <main className="max-w-7xl mx-auto px-4 py-6">
-                        {filtroVencidos && (
-                            <div className="mb-4">
-                                <button 
-                                    onClick={() => setFiltroVencidos(false)}
-                                    className="w-full p-3 bg-blue-100 text-blue-800 font-bold rounded-lg shadow hover:bg-blue-200 transition-colors flex items-center justify-center gap-2"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                                    Limpiar Filtro (Mostrando solo Vencidos)
-                                </button>
-                            </div>
-                        )}
-                        <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-                            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder=" Buscar por N° o Carátula..." className={`border p-3 rounded-lg w-full shadow-lg barcode-active-indicator ${scanned ? 'barcode-scanned' : ''}`}/>
-                            <div className="flex gap-2 w-full md:w-auto">
-                                <button 
-                                    onClick={handlePrintVistaActual}
-                                    title="Imprimir listado actual"
-                                    className="flex items-center gap-2 p-3 bg-white text-gray-700 rounded-lg shadow-lg whitespace-nowrap transition hover:bg-gray-100 font-bold"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                                    🖨️ Imprimir Vista
-                                </button>
-                                <button 
-                                    onClick={() => setBarcodeListenerActive(!barcodeListenerActive)} 
-                                    title="Activar/Desactivar Lector de Códigos de Barras" 
-                                    className={`flex items-center gap-2 p-3 rounded-lg shadow-lg whitespace-nowrap transition w-full md:w-auto justify-center ${barcodeListenerActive ? 'bg-green-100' : 'bg-gray-200'}`}
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={barcodeListenerActive ? 'text-green-600' : 'text-gray-500'}>
-                                        <path d="M3 6h18M6 12h12M9 18h6"/>
-                                    </svg>
-                                    <span className={`text-sm font-medium ${barcodeListenerActive ? 'text-green-700' : 'text-gray-600'}`}>
-                                        {barcodeListenerActive ? 'Lector Activo' : 'Lector Inactivo'}
-                                    </span>
-                                </button>
-                            </div>
-                        </div>
-                        {loading && <div className="text-center text-white py-8"><p className="bg-black/20 inline-block p-4 rounded-lg">Cargando legajos...</p></div>}
-                        {error && <div className="text-center bg-red-100 text-red-800 p-4 rounded-lg shadow-md"><strong>Error:</strong> {error}</div>}
-                        {/* VISTA DE ESCRITORIO - TABLA */}
-                        <div className="hidden md:block overflow-x-auto rounded-xl border border-white/20 bg-white/60 backdrop-blur-md shadow-2xl">
-                            <table className="w-full text-sm">
-                                <thead className="bg-white/50"><tr><th className="p-4 text-left font-semibold text-gray-700">Legajo N°</th><th className="p-4 text-left font-semibold text-gray-700">Carátula</th><th className="p-4 text-left font-semibold text-gray-700">Instructor</th><th className="p-4 text-left font-semibold text-gray-700">Ubicación</th><th className="p-4 text-left font-semibold text-gray-700">Vencimiento</th><th className="p-4 text-left font-semibold text-gray-700">Estado</th><th className="p-4 text-right font-semibold text-gray-700">Acciones</th></tr></thead>
-                                <tbody>
-                                    {!loading && !error && filteredLegajos.length === 0 && (<tr><td className="p-6 text-center text-gray-700" colSpan={7}>{filtroVencidos ? "No hay legajos vencidos." : "No se encontraron legajos."}</td></tr>)}
-                                    {filteredLegajos.map(l => (
-                                        <tr
-                                            key={l.id}
-                                            ref={el => legajoRefs.current[l.id] = el}
-                                            className={`border-t border-white/50 hover:bg-white/60 transition-colors duration-300 ${l.id === highlightedLegajoId ? 'highlighted-row' : ''}`}
-                                        >
-                                            <td className="p-4 font-medium">{l.numero}</td><td className="p-4">{l.caratula}</td><td className="p-4">{l.instructorNombre || 'Sin Asignar'}</td><td className="p-4">{l.ubicacionActual?.lugar}</td><td className="p-4">{l.vencimiento ? fmtDateTime(l.vencimiento) : '—'}</td><td className="p-4">{isOverdue(l) ? <Pill color="red">Vencido</Pill> : l.enTransito ? <Pill color="blue">En Tránsito</Pill> : <Pill color="green">En Juzgado</Pill>}</td>
-                                            <td className="p-4 text-right space-x-1 whitespace-nowrap">
-                                                {l.enTransito ? <button onClick={() => registrarEntrada(l.id)} className="px-3 py-1.5 bg-green-600 text-white rounded-md text-xs hover:bg-green-700 shadow"> ⬅️  Entrada</button> : <button onClick={() => handleAbrirSalida(l)} className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs hover:bg-blue-700 shadow"> ➡️  Salida</button>}
-                                                <button onClick={() => handleVerHistorial(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"> 🕘  Hist.</button>
-                                                <button onClick={() => handleAbrirEdit(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"> 📝  Edit.</button>
-                                                <button onClick={() => handleAbrirBarcode(l)} title="Generar Código de Barras" className="px-2 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg></button>
-                                                <button onClick={() => eliminarLegajo(l.id)} title="Enviar a Papelera" className="px-3 py-1.5 bg-yellow-100/80 text-yellow-800 rounded-md text-xs hover:bg-yellow-200 shadow"> 🗑️ </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        {/* VISTA MÓVIL - TARJETAS */}
-                        <div className="md:hidden space-y-4">
-                            {!loading && !error && filteredLegajos.length === 0 && (<div className="p-6 text-center text-white bg-black/10 rounded-lg">{filtroVencidos ? "No hay legajos vencidos." : "No se encontraron legajos."}</div>)}
-                            {filteredLegajos.map(l => (
-                                <div 
-                                    key={l.id}
-                                    ref={el => legajoRefs.current[l.id] = el}
-                                    className={`p-4 rounded-xl shadow-lg border border-white/20 bg-white/60 backdrop-blur-md transition-colors duration-300 space-y-3 ${l.id === highlightedLegajoId ? 'highlighted-row' : ''}`}
-                                >
-                                    <div>
-                                        <div className="flex justify-between items-start">
-                                            <span className="font-bold text-lg">{l.numero}</span>
-                                            {isOverdue(l) ? <Pill color="red">Vencido</Pill> : l.enTransito ? <Pill color="blue">En Tránsito</Pill> : <Pill color="green">En Juzgado</Pill>}
-                                        </div>
-                                        <p className="text-sm text-gray-700">{l.caratula}</p>
-                                    </div>
-                                    <div className="text-sm space-y-1 border-t pt-2">
-                                        <p><span className="font-semibold">Instructor:</span> {l.instructorNombre || 'Sin Asignar'}</p>
-                                        <p><span className="font-semibold">Ubicación:</span> {l.ubicacionActual?.lugar}</p>
-                                        <p><span className="font-semibold">Vencimiento:</span> {l.vencimiento ? fmtDateTime(l.vencimiento) : '—'}</p>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2 pt-2 border-t">
-                                        {l.enTransito ? <button onClick={() => registrarEntrada(l.id)} className="px-3 py-1.5 bg-green-600 text-white rounded-md text-xs hover:bg-green-700 shadow"> ⬅️  Entrada</button> : <button onClick={() => handleAbrirSalida(l)} className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs hover:bg-blue-700 shadow"> ➡️  Salida</button>}
-                                        <button onClick={() => handleVerHistorial(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"> 🕘  Hist.</button>
-                                        <button onClick={() => handleAbrirEdit(l)} className="px-3 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"> 📝  Edit.</button>
-                                        <button onClick={() => handleAbrirBarcode(l)} title="Generar Código de Barras" className="px-2 py-1.5 bg-white/80 rounded-md text-xs hover:bg-gray-200 shadow"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M6 12h12M9 18h6"/></svg></button>
-                                        <button onClick={() => eliminarLegajo(l.id)} title="Enviar a Papelera" className="px-3 py-1.5 bg-yellow-100/80 text-yellow-800 rounded-md text-xs hover:bg-yellow-200 shadow"> 🗑️ </button>
-                                    </div>
+
+                    <main className="max-w-7xl mx-auto px-4 lg:px-8 space-y-6">
+                        {/* PANEL BENTO BOX */}
+                        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
+                                <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Operaciones</h2>
+                                <div className="flex flex-col gap-2 flex-grow justify-center">
+                                    <button onClick={() => toggleModal('new', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-900/20">➕ NUEVO LEGAJO</button>
                                 </div>
-                            ))}
+                            </div>
+                            <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
+                                <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Auditoría Diaria</h2>
+                                <div className="flex flex-col gap-2 flex-grow justify-center">
+                                    <button onClick={() => toggleModal('repEnt', true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-900/20">📥 ENTRADAS</button>
+                                    <button onClick={() => toggleModal('repSal', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-900/20">📤 SALIDAS</button>
+                                </div>
+                            </div>
+                            <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
+                                <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Configuración</h2>
+                                <div className="flex flex-col gap-2 flex-grow justify-center">
+                                    <button onClick={() => toggleModal('inst', true)} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-purple-900/20">👥 PERSONAL</button>
+                                    <button onClick={() => toggleModal('trash', true)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-amber-900/20 relative">
+                                        🗑️ PAPELERA
+                                        {deletedLegajos.length > 0 && <span className="ml-2 bg-white text-amber-600 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">{deletedLegajos.length}</span>}
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* BARRA DE HERRAMIENTAS - PROPORCIONAL */}
+                        <div className="flex flex-col lg:flex-row gap-2 items-stretch">
+                            <div className="relative flex-[3] group">
+                                <span className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-blue-400 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                </span>
+                                <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar expediente o carátula..." className={`w-full pl-12 pr-4 py-4 glass-panel rounded-2xl outline-none border-transparent focus:border-blue-500/50 transition-all text-sm font-medium text-white ${scanned ? 'barcode-scanned' : ''}`}/>
+                            </div>
+                            <button onClick={handlePrintVista} className="flex-1 px-5 glass-panel rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white/10 transition-colors py-4 lg:py-0 shadow-lg">🖨️ Imprimir</button>
+                            <button onClick={() => setBarcodeActive(!barcodeActive)} className={`flex-1 px-5 rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all py-4 lg:py-0 shadow-lg ${barcodeActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-500 border border-white/5'}`}>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+                                {barcodeActive ? 'Lector On' : 'Lector Off'}
+                            </button>
+                        </div>
+
+                        {/* LISTADO */}
+                        <div className="space-y-4">
+                            {filtroVencidos && (
+                                <div className="flex justify-between items-center bg-rose-500/10 p-3 rounded-2xl border border-rose-500/20">
+                                    <span className="text-xs font-bold text-rose-400 flex items-center gap-2"><span className="w-2 h-2 bg-rose-500 rounded-full"></span> SÓLO LEGAJOS VENCIDOS</span>
+                                    <button onClick={() => setFiltroVencidos(false)} className="text-[10px] font-black uppercase text-rose-400 hover:underline px-2">Limpiar</button>
+                                </div>
+                            )}
+
+                            <div className="hidden md:block overflow-hidden rounded-3xl glass-panel shadow-2xl border border-white/10">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-white/5 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                        <tr>
+                                            <th className="p-4 text-left">N° Legajo</th>
+                                            <th className="p-4 text-left">Carátula / Instructor</th>
+                                            <th className="p-4 text-left">Localización</th>
+                                            <th className="p-4 text-left">Vencimiento</th>
+                                            <th className="p-4 text-left">Estado</th>
+                                            <th className="p-4 text-right">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredLegajos.map(l => (
+                                            <tr key={l.id} ref={el => legajoRefs.current[l.id] = el} className={`border-t border-white/5 transition-all ${l.id === highlightedId ? 'highlighted-row' : ''}`}>
+                                                <td className="p-4 font-extrabold text-white text-lg">{l.numero}</td>
+                                                <td className="p-4">
+                                                    <div className="font-semibold text-slate-200 leading-tight mb-1">{l.caratula}</div>
+                                                    <div className="text-[9px] font-bold text-slate-500 uppercase">👤 {l.instructorNombre}</div>
+                                                </td>
+                                                <td className="p-4 font-semibold text-white">{l.ubicacionActual?.lugar}</td>
+                                                <td className="p-4 font-semibold text-white">{fmtDateTime(l.vencimiento)}</td>
+                                                <td className="p-4">{isOverdue(l) ? <Pill color="red">Vencido</Pill> : l.enTransito ? <Pill color="blue">Tránsito</Pill> : <Pill color="green">Juzgado</Pill>}</td>
+                                                <td className="p-4 text-right">
+                                                    <div className="flex gap-1 justify-end">
+                                                        {l.enTransito ? (
+                                                            <ActionButton onClick={() => handleConfirm("Registrar Entrada", "¿Confirma reingreso?", async () => { await legajosCollectionRef.doc(l.id).update({ enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: firebase.firestore.FieldValue.arrayUnion({ id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email }) }); setConfirm({ ...confirm, open: false }); }, "bg-emerald-600")} icon="📥" color="green" />
+                                                        ) : (
+                                                            <ActionButton onClick={() => { setCurrent(l); setSalidaForm({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" }); toggleModal('salida', true); }} icon="📤" color="blue" />
+                                                        )}
+                                                        <ActionButton onClick={() => { setCurrent(l); toggleModal('history', true); }} icon="🕘" />
+                                                        <ActionButton onClick={() => { setCurrent(l); setEditForm({ id: l.id, numero: l.numero, caratula: l.caratula, instructorId: l.instructorId || "", ubicacionActual: l.ubicacionActual?.lugar || "", vencimiento: l.enTransito ? dateToInputFormat(l.vencimiento) : '' }); toggleModal('edit', true); }} icon="📝" />
+                                                        <ActionButton onClick={() => { setCurrent(l); toggleModal('barcode', true); }} icon="🏷️" />
+                                                        <ActionButton onClick={() => onEliminar(l.id)} icon="🗑️" color="red" />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </main>
                 </div>
-                
-                <AlertModal isOpen={alertModal.isOpen} onClose={() => setAlertModal({isOpen: false})} title={alertModal.title} message={alertModal.message} />
-                <ConfirmationModal isOpen={confirmation.isOpen} title={confirmation.title} message={confirmation.message} onConfirm={confirmation.onConfirm} onCancel={closeConfirmation} confirmText={confirmation.confirmText} confirmColor={confirmation.confirmColor} />
-                <BarcodeModal open={showBarcode} onClose={() => setShowBarcode(false)} legajo={current} />
-                <DeletedLogModal open={showDeletedLog} onClose={() => setShowDeletedLog(false)} deletedLegajos={deletedLegajos} onRestore={restoreLegajo} onPermanentDelete={permanentlyDeleteLegajo} />
-                <InstructoresModal open={showInstructores} onClose={() => setShowInstructores(false)} instructores={instructores} legajos={legajos} onAdd={addInstructor} onEdit={editInstructor} onDelete={deleteInstructor} onAlert={(message) => setAlertModal({isOpen: true, title: 'Acción no permitida', message})} />
-                <ReporteSalidasModal open={showReporteSalidas} onClose={() => setShowReporteSalidas(false)} legajos={legajos} onPrint={handlePrintSalidas} />
-                <ReporteEntradasModal open={showReporteEntradas} onClose={() => setShowReporteEntradas(false)} legajos={legajos} onPrint={handlePrintEntradas} />
-                <Modal open={showNew} onClose={() => setShowNew(false)} title="Nuevo Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowNew(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={crearLegajo}>Crear Legajo</button></>}>
-                    <div><label className="font-semibold text-gray-800">Legajo N° (formato: 1234/2024)</label><input value={newForm.numero} onChange={(e) => setNewForm({...newForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={newForm.caratula} onChange={(e) => setNewForm({...newForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Instructor a Cargo</label><select value={newForm.instructorId} onChange={(e) => setNewForm({...newForm, instructorId: e.target.value})} className="border p-2 rounded-lg w-full mt-1"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
+
+                {/* MODALES */}
+                <BarcodeModal open={modals.barcode} onClose={() => toggleModal('barcode', false)} legajo={current} />
+                <InstructoresModal open={modals.inst} onClose={() => toggleModal('inst', false)} instructores={instructores} legajos={legajos} onAdd={async (n) => await instructoresCollectionRef.add({nombre: n})} onEdit={async (id, n) => await instructoresCollectionRef.doc(id).update({nombre: n})} onDelete={async (id) => await instructoresCollectionRef.doc(id).delete()} onAlert={m => setAlertState({open: true, title: "Aviso", msg: m})} />
+                <ReporteModal open={modals.repSal} onClose={() => toggleModal('repSal', false)} type="salidas" legajos={legajos} onPrint={handlePrintSalidas} />
+                <ReporteModal open={modals.repEnt} onClose={() => toggleModal('repEnt', false)} type="entradas" legajos={legajos} onPrint={handlePrintEntradas} />
+
+                <Modal open={modals.new} onClose={() => toggleModal('new', false)} title="Nuevo Expediente" footer={<><button onClick={() => toggleModal('new', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase">Cancelar</button><button onClick={onCrearLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Confirmar</button></>}>
+                    <div className="space-y-4 text-sm font-medium">
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">N° Legajo</label><input value={newForm.numero} onChange={e => setNewForm({...newForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white font-mono" placeholder="Ej: 1234/2024"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Carátula</label><textarea value={newForm.caratula} onChange={e => setNewForm({...newForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white h-24"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Instructor</label><select value={newForm.instructorId} onChange={e => setNewForm({...newForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
+                    </div>
                 </Modal>
-                <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Editar Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowEdit(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={editarLegajo}>Guardar Cambios</button></>}>
-                    <div><label className="font-semibold text-gray-800">Legajo N°</label><input value={editForm.numero} onChange={(e) => setEditForm({...editForm, numero: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Carátula</label><input value={editForm.caratula} onChange={(e) => setEditForm({...editForm, caratula: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Instructor a Cargo</label><select value={editForm.instructorId} onChange={(e) => setEditForm({...editForm, instructorId: e.target.value})} className="border p-2 rounded-lg w-full mt-1"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Ubicación (Corrección Manual)</label><input value={editForm.ubicacionActual} onChange={(e) => setEditForm({...editForm, ubicacionActual: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/><p className="text-xs text-gray-500 mt-1">Modificar esto solo para correcciones. El sistema gestiona la ubicación automáticamente con "Entrada" y "Salida".</p></div>
-                    {current && current.enTransito && (
-                        <div className="mt-4"><label className="font-semibold text-gray-800">Fecha de Vencimiento</label><input type="datetime-local" value={editForm.vencimiento} onChange={(e) => setEditForm({...editForm, vencimiento: e.target.value})} className="border p-2 rounded-lg w-full mt-1 bg-white"/><p className="text-xs text-gray-500 mt-1">Este campo es editable porque el legajo está "En Tránsito".</p></div>
-                    )}
+
+                <Modal open={modals.edit} onClose={() => toggleModal('edit', false)} title="Editar Datos" footer={<><button onClick={() => toggleModal('edit', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cerrar</button><button onClick={onEditarLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Guardar</button></>}>
+                    <div className="space-y-4 text-sm font-medium">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Número</label><input value={editForm.numero} onChange={e => setEditForm({...editForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white font-mono"/></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Instructor</label><select value={editForm.instructorId} onChange={e => setEditForm({...editForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white">{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
+                        </div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Carátula</label><textarea value={editForm.caratula} onChange={e => setEditForm({...editForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white h-20"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Ubicación Manual</label><input value={editForm.ubicacionActual} onChange={e => setEditForm({...editForm, ubicacionActual: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white"/></div>
+                        {current?.enTransito && (
+                            <div><label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">Vencimiento</label><input type="datetime-local" value={editForm.vencimiento} onChange={e => setEditForm({...editForm, vencimiento: e.target.value})} className="w-full bg-slate-950/50 border border-blue-500/30 rounded-xl p-3 text-white"/></div>
+                        )}
+                    </div>
                 </Modal>
-                <Modal open={showSalida} onClose={() => setShowSalida(false)} title="Registrar Salida de Legajo" footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowSalida(false)}>Cancelar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={registrarSalida}>Registrar Salida</button></>}>
-                    <div><label className="font-semibold text-gray-800">Dependencia</label><select value={salidaForm.dependencia} onChange={(e) => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1">{DEPENDENCIAS.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                    {salidaForm.dependencia === 'Otra' && <div className="mt-4"><label className="font-semibold text-gray-800">Especifique otra dependencia</label><input value={salidaForm.otraDependencia} onChange={(e) => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>}
-                    <div className="mt-4"><label className="font-semibold text-gray-800">Plazo de devolución (días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={(e) => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="border p-2 rounded-lg w-full mt-1"/></div>
+
+                <Modal open={modals.history} onClose={() => toggleModal('history', false)} title={`Historial: ${current?.numero}`} footer={<button onClick={() => toggleModal('history', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cerrar</button>}>
+                    <div className="space-y-4">
+                        {current?.historial && [...current.historial].sort((a,b) => (b.fecha?.toMillis ? b.fecha.toMillis() : new Date(b.fecha).getTime()) - (a.fecha?.toMillis ? a.fecha.toMillis() : new Date(a.fecha).getTime())).map(h => (
+                            <div key={h.id} className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                                <div className="flex justify-between items-start mb-2">
+                                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${h.tipo === 'SALIDA' ? 'bg-blue-500 text-white' : h.tipo === 'ENTRADA' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-200'}`}>{h.tipo}</span>
+                                    <span className="text-[10px] font-mono text-slate-500">{fmtDateTime(h.fecha)}</span>
+                                </div>
+                                <p className="text-sm text-slate-300 mb-1">{h.notas}</p>
+                                <p className="text-[9px] font-bold text-slate-600 uppercase">👤 Usuario: {h.usuario}</p>
+                            </div>
+                        ))}
+                    </div>
                 </Modal>
-                <Modal open={showHist} onClose={() => setShowHist(false)} title={`Historial del Legajo ${current?.numero || ''}`} footer={<><button className="px-4 py-2 bg-gray-200 rounded-lg" onClick={() => setShowHist(false)}>Cerrar</button></>}>
-                     {current?.historial && current.historial.length > 0 ? (
-                        <ul className="space-y-3">
-                            {[...current.historial].sort((a,b) => (b.fecha?.toMillis ? b.fecha.toMillis() : new Date(b.fecha).getTime()) - (a.fecha?.toMillis ? a.fecha.toMillis() : new Date(a.fecha).getTime())).map(mov => (
-                                <li key={mov.id} className="text-sm border-b pb-2 last:border-b-0">
-                                    <div className="flex justify-between items-center"><span className="font-semibold">{mov.tipo}</span><span className="text-xs">{fmtDateTime(mov.fecha)}</span></div>
-                                    <p className="mt-1">{mov.notas}</p>
-                                    {mov.usuario && <p className="text-xs text-gray-500 mt-1">Realizado por: {mov.usuario}</p>}
-                                </li>
-                            ))}
-                        </ul>
-                    ) : (<p className="text-sm">No hay movimientos registrados.</p>)}
+
+                <Modal open={modals.salida} onClose={() => toggleModal('salida', false)} title="Registrar Salida" footer={<><button onClick={() => toggleModal('salida', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cancelar</button><button onClick={async () => {
+                    const dest = salidaForm.dependencia === 'Otra' ? salidaForm.otraDependencia.trim() : salidaForm.dependencia;
+                    if(!dest) return setAlertState({open:true, title:"Error", msg:"Defina un destino."});
+                    handleConfirm("Autorizar Salida", `¿Autoriza el envío a ${dest}?`, async () => {
+                        const now = new Date(); const venc = salidaForm.plazoDias ? addDays(now, salidaForm.plazoDias) : null;
+                        const hist = { id: uid(), tipo: 'SALIDA', fecha: now, notas: `Enviado a ${dest}.`, plazo: salidaForm.plazoDias || 0, vencimiento: venc, usuario: user.email };
+                        await legajosCollectionRef.doc(current.id).update({ enTransito: true, ubicacionActual: { lugar: dest, desde: now }, vencimiento: venc, historial: firebase.firestore.FieldValue.arrayUnion(hist) });
+                        toggleModal('salida', false); setConfirm({ ...confirm, open: false });
+                    });
+                }} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase shadow-lg shadow-blue-900/40">Confirmar Salida</button></>}>
+                    <div className="space-y-4 text-sm font-medium">
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Destino</label><select value={salidaForm.dependencia} onChange={e => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white">{DEPENDENCIAS.map(d => <option key={d} value={d} className="bg-slate-900">{d}</option>)}</select></div>
+                        {salidaForm.dependencia === 'Otra' && (<div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Especifique</label><input value={salidaForm.otraDependencia} onChange={e => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white"/></div>)}
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Plazo (Días)</label><input type="number" min="0" value={salidaForm.plazoDias} onChange={e => setSalidaForm({...salidaForm, plazoDias: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white"/></div>
+                    </div>
                 </Modal>
+
+                <Modal open={modals.trash} onClose={() => toggleModal('trash', false)} title="Registro de Eliminados" maxWidth="max-w-4xl" footer={<button onClick={() => toggleModal('trash', false)} className="px-6 py-2 bg-slate-700 rounded-xl text-xs font-bold">Cerrar</button>}>
+                    <div className="overflow-x-auto text-xs"><table className="w-full"><thead className="bg-white/5 text-slate-500 uppercase tracking-widest"><tr><th className="p-3 text-left">Expediente</th><th className="p-3 text-left">Borrado</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{deletedLegajos.map(l => (<tr key={l.id} className="border-t border-white/5"><td className="p-3 font-bold text-white">{l.numero}<br/><span className="text-[10px] text-slate-500 font-medium normal-case">{l.caratula}</span></td><td className="p-3 text-slate-500 leading-tight">{fmtDateTime(l.deletedAt)}<br/><span className="text-[8px] uppercase text-slate-600">Por: {l.deletedBy}</span></td><td className="p-3 text-right"><button onClick={async () => { const {deletedAt, deletedBy, ...rest} = l; await legajosCollectionRef.doc(l.id).set({...rest, historial: [{id: uid(), tipo:'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado.', usuario: user.email}, ...l.historial]}); await deletedCollectionRef.doc(l.id).delete(); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-lg font-black uppercase">Restaurar</button></td></tr>))}</tbody></table></div>
+                </Modal>
+
+                {confirm.open && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-white/10 shadow-2xl">
+                            <h3 className="text-xl font-black text-white mb-3 tracking-tighter">{confirm.title}</h3>
+                            <p className="text-slate-400 font-medium mb-8 leading-relaxed text-sm">{confirm.msg}</p>
+                            <div className="flex gap-3"><button onClick={() => setConfirm({ ...confirm, open: false })} className="flex-1 py-3 glass-panel rounded-2xl font-bold text-xs uppercase tracking-widest text-slate-300">Cerrar</button><button onClick={confirm.onOk} className={`flex-1 py-3 ${confirm.color} text-white rounded-2xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-blue-900/40 transition-transform active:scale-95`}>Continuar</button></div>
+                        </div>
+                    </div>
+                )}
+
+                {alertState.open && (
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-rose-500/20 shadow-2xl">
+                            <h3 className="text-xl font-black text-white mb-3 tracking-tighter">{alertState.title}</h3>
+                            <p className="text-slate-400 font-medium mb-8 text-sm">{alertState.msg}</p>
+                            <button onClick={() => setAlertState({ ...alertState, open: false })} className="w-full py-3 bg-rose-600 text-white rounded-2xl font-bold text-xs uppercase tracking-widest">Entendido</button>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
     
-    // =======================================================
-    //  PANTALLA DE LOGIN
-    // =======================================================
     function LoginScreen() {
         const [email, setEmail] = React.useState("");
-        const [password, setPassword] = React.useState("");
-        const [error, setError] = React.useState(null);
+        const [pass, setPass] = React.useState("");
         const [loading, setLoading] = React.useState(false);
         const handleLogin = (e) => {
-            e.preventDefault();
-            setError(null);
-            setLoading(true);
-            auth.signInWithEmailAndPassword(email, password)
-                .catch(err => {
-                    if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-                        setError("Correo o contraseña incorrectos.");
-                    } else {
-                        setError("Error al iniciar sesión. Verifique la conexión.");
-                    }
-                    setLoading(false);
-                });
+            e.preventDefault(); setLoading(true);
+            auth.signInWithEmailAndPassword(email, pass).catch(err => { console.error(err); setLoading(false); });
         };
         return (
-            <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4">
-                <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-sm">
-                    <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">Sistema de Gestión de Legajos</h2>
-                    <form onSubmit={handleLogin}>
-                        <div className="mb-4"><label className="block text-sm font-medium text-gray-700">Correo Electrónico</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 p-2 border rounded w-full" required /></div>
-                        <div className="mb-6"><label className="block text-sm font-medium text-gray-700">Contraseña</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 p-2 border rounded w-full" required /></div>
-                        {error && <p className="text-red-500 text-sm text-center mb-4">{error}</p>}
-                        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:bg-blue-300">{loading ? 'Accediendo...' : 'Acceder'}</button>
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+                <BackgroundGradientAnimation />
+                <div className="max-w-sm w-full glass-panel rounded-[48px] p-10 border-white/5 shadow-2xl relative z-10 text-center">
+                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-xl shadow-blue-900/40">
+                         <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11H5m14 0a2 2 0 0 1 12 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" /></svg>
+                    </div>
+                    <h2 className="text-3xl font-black text-white tracking-tighter mb-2">CONTROL JEP2</h2>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[4px] mb-10">Poder Judicial</p>
+                    <form onSubmit={handleLogin} className="space-y-4">
+                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email Judicial" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium" required />
+                        <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Contraseña" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium" required />
+                        <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-[2px] text-[10px] hover:bg-blue-500 shadow-xl transition-all disabled:bg-slate-800 tracking-widest">{loading ? 'AUTENTICANDO...' : 'INICIAR SESIÓN'}</button>
                     </form>
+                    <p className="mt-10 text-[9px] text-center font-bold text-slate-600 uppercase tracking-widest opacity-50 font-black">© 2025 Catamarca - Poder Judicial</p>
                 </div>
             </div>
         );
     }
-    // =======================================================
-    //  COMPONENTE PRINCIPAL QUE GESTIONA LA AUTENTICACIÓN
-    // =======================================================
+
     function App() {
-        const [user, setUser] = React.useState(null);
-        const [loading, setLoading] = React.useState(true);
-        React.useEffect(() => {
-            const unsubscribe = auth.onAuthStateChanged(currentUser => {
-                setUser(currentUser);
-                setLoading(false);
-            });
-            return () => unsubscribe();
-        }, []);
-        const handleSignOut = () => { auth.signOut(); };
-        if (loading) { return <div className="min-h-screen flex items-center justify-center bg-gray-800 text-white"><p>Verificando sesión...</p></div>; }
-        if (user) { return <GestorDeLegajos user={user} onSignOut={handleSignOut} />; } 
-        else { return <LoginScreen />; }
+        const [u, setU] = React.useState(null);
+        const [l, setL] = React.useState(true);
+        React.useEffect(() => { const unsub = auth.onAuthStateChanged(user => { setU(user); setL(false); }); return unsub; }, []);
+        if (l) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><div className="w-12 h-12 border-4 border-blue-600/20 border-t-blue-600 rounded-full animate-spin"></div></div>;
+        return u ? <GestorDeLegajos user={u} onSignOut={() => auth.signOut()} /> : <LoginScreen />;
     }
         
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
+
     </script>
 </body>
 </html>
