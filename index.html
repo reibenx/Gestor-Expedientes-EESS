@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v26.8 (Corrección de Sintaxis)</title>
+    <title>Gestión de Legajos v26.9 (Control de Carátulas Similares)</title>
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -55,6 +55,7 @@
             border-left: 4px solid #3b82f6 !important;
         }
 
+        /* Scrollbar personalizada */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
@@ -66,6 +67,9 @@
 
     <script type="text/babel">
     
+    // =======================================================
+    //  INICIALIZACIÓN DE FIREBASE
+    // =======================================================
     const firebaseConfig = {
       apiKey: "AIzaSyDCCruZk6UAf2ybjJG6gihuUrJMZduhUI0",
       authDomain: "gestor-legajos-eess.firebaseapp.com",
@@ -77,24 +81,31 @@
 
     let db, auth;
     try {
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
         db = firebase.firestore();
         auth = firebase.auth();
     } catch (e) {
-        console.error("Firebase Error:", e);
+        console.error("Firebase Init Error:", e);
     }
 
     const legajosCollectionRef = db.collection("legajos");
     const deletedCollectionRef = db.collection("legajos_eliminados");
     const instructoresCollectionRef = db.collection("instructores");
 
+    // =======================================================
+    //  UTILIDADES
+    // =======================================================
     const DEPENDENCIAS = ["Fiscalía Correccional N° 1", "Fiscalía Correccional N° 2", "Fiscalía Correccional N° 3","Defensoría N° 1", "Defensoría N° 2", "Defensoría N° 3", "Defensoría N° 4", "Defensoría N° 5", "Defensoría N° 6","Gabinete Técnico de Ejecución", "Corte de Justicia", "Otra"];
+
     const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
     const fmtDateTime = (d) => {
         if (!d) return "—";
         const date = d.toDate ? d.toDate() : new Date(d);
-        return isNaN(date.getTime()) ? "—" : date.toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+        if (isNaN(date.getTime())) return "—";
+        return date.toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" });
     };
 
     const isOverdue = (l) => {
@@ -112,19 +123,23 @@
 
     const dateToInputString = (date = new Date()) => {
         const d = new Date(date);
-        return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+        const pad = (num) => num.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     };
 
     const dateToInputFormat = (date) => {
         if (!date) return '';
         const d = date.toDate ? date.toDate() : new Date(date);
-        const pad = (n) => n.toString().padStart(2, '0');
+        const pad = (num) => num.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
 
     const validateNumeroExpediente = (v) => /^\d{1,10}\/\d{4}$/.test((v || "").trim());
     const addDays = (dateObj, days) => { const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0)); return d; };
 
+    // =======================================================
+    //  COMPONENTES UI
+    // =======================================================
     function BackgroundGradientAnimation() { return <div className="background-gradient-animation"></div>; }
 
     const Pill = ({ children, color = "gray" }) => {
@@ -147,7 +162,11 @@
             purple: "bg-purple-600 hover:bg-purple-500 text-white",
             yellow: "bg-amber-600 hover:bg-amber-500 text-white"
         };
-        return <button onClick={onClick} title={title} className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center ${colors[color]}`}>{icon}</button>;
+        return (
+            <button onClick={onClick} title={title} className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center ${colors[color]}`}>
+                {icon}
+            </button>
+        );
     };
 
     const Modal = ({ open, onClose, title, children, footer, maxWidth = "max-w-xl" }) => {
@@ -166,8 +185,6 @@
         );
     };
 
-    // --- COMPONENTES DE MODAL ---
-
     function BarcodeModal({ open, onClose, legajo }) {
         React.useEffect(() => {
             if (open && legajo) {
@@ -178,10 +195,18 @@
         const handlePrint = () => {
             const printWindow = window.open('', '', 'height=600,width=800');
             printWindow.document.write('<html><head><title>Imprimir Código de Barras</title>');
-            printWindow.document.write(`<style>@page { size: A4; margin: 0; } body { margin: 0; font-family: sans-serif; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; } .container { margin-bottom: 1.5cm; margin-right: 1.5cm; }</style>`);
-            printWindow.document.write('</head><body><div class="container"><svg id="barcode-print"></svg></div>');
+            printWindow.document.write(`
+                <style>
+                    @page { size: A4; margin: 0; }
+                    body { margin: 0; font-family: sans-serif; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; }
+                    .container { margin-bottom: 1.5cm; margin-right: 1.5cm; }
+                </style>
+            `);
+            printWindow.document.write('</head><body>');
+            printWindow.document.write('<div class="container"><svg id="barcode-print"></svg></div>');
             printWindow.document.write('<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>');
-            printWindow.document.write(`<script>try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 100, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 300); } catch(e) { window.close(); }<\/script></body></html>`);
+            printWindow.document.write('<script>');
+            printWindow.document.write(`try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 100, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 300); } catch(e) { window.close(); }<\/script></body></html>`);
             printWindow.document.close();
         };
         if (!open || !legajo) return null;
@@ -216,7 +241,7 @@
                             <li key={i.id} className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
                                 {editing?.id === i.id ? (
                                     <input type="text" value={editing.nombre} onChange={e => setEditing({...editing, nombre: e.target.value})} className="bg-slate-800 border border-white/20 p-1 rounded w-full mr-2 text-white"/>
-                                ) : ( <span className="text-slate-200">{i.nombre}</span> )}
+                                ) : ( <span>{i.nombre}</span> )}
                                 <div className="flex gap-1">
                                     {editing?.id === i.id ? (
                                         <button onClick={() => { onEdit(editing.id, editing.nombre); setEditing(null); }} className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold">OK</button>
@@ -259,7 +284,7 @@
                             <div className="text-sm text-slate-200"><strong>{l.numero}</strong> - {l.caratula}</div>
                         </div>
                     ))}
-                    {filtered.length === 0 && <p className="text-center py-6 text-slate-500 italic font-medium">Sin movimientos registrados para esta fecha.</p>}
+                    {filtered.length === 0 && <p className="text-center py-6 text-slate-500 italic font-medium">Sin movimientos para esta fecha.</p>}
                 </div>
             </Modal>
         );
@@ -348,19 +373,31 @@
                 if (!snapshot.empty) return setAlertState({ open: true, title: "Legajo Duplicado", msg: `Ya existe un expediente con el número ${num}.` });
             } catch (e) { console.error(e); }
 
-            // 2. Control de similitud por Carátula
-            const cleanText = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s]/gi, '');
-            const keywords = cleanText(carat).split(' ').filter(w => w.length > 3 && !['contra', 'delito', 'sobre', 'fiscalia', 'defensoria'].includes(w));
+            // 2. Control de similitud por Carátula (Formatos APELLIDO, NOMBRE S/DELITO)
+            const cleanText = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s]/gi, ' ').trim();
             
+            // Extraer palabras clave ignorando conectores comunes
+            const stopWords = ['contra', 'delito', 'sobre', 'fiscalia', 'defensoria', 'ejecucion', 'condena', 'condicional', 'inhabilitacion'];
+            const tokens = cleanText(carat).split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+            
+            // Identificar apellido (si hay coma, es la primera palabra)
+            const apellido = cleanText(carat.split(',')[0]).split(/\s+/)[0];
+
             const parecidos = legajos.filter(l => {
-                const target = cleanText(l.caratula);
-                return keywords.some(k => target.includes(k));
+                const targetClean = cleanText(l.caratula);
+                // Si el apellido coincide exactamente
+                const coincideApellido = targetClean.includes(apellido);
+                // Contar cuántos otros tokens coinciden
+                const coincidenciasTokens = tokens.filter(t => t !== apellido && targetClean.includes(t)).length;
+                
+                // Criterio de similitud: Mismo apellido + al menos 1 nombre/palabra más
+                return coincideApellido && coincidenciasTokens >= 1;
             }).slice(0, 5);
 
-            const title = parecidos.length > 0 ? "⚠️ Posible Duplicidad Detectada" : "Confirmar Creación";
+            const title = parecidos.length > 0 ? "⚠️ Alerta de Similitud" : "Confirmar Creación";
             const color = parecidos.length > 0 ? "bg-amber-600" : "bg-blue-600";
             const msg = parecidos.length > 0 
-                ? "Se encontraron expedientes con carátulas similares. Revise la lista debajo para evitar duplicados innecesarios antes de confirmar." 
+                ? "Se han encontrado expedientes con carátulas muy parecidas. Revise si alguno de los siguientes ya corresponde a este caso:" 
                 : "¿Desea dar de alta este expediente en el sistema?";
 
             handleConfirm(title, msg, async () => {
@@ -380,7 +417,7 @@
         const onEditarLegajo = async () => {
             handleConfirm("Guardar Cambios", "¿Confirmas la modificación?", async () => {
                 const inst = instructores.find(i => i.id === editForm.instructorId);
-                const hist = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados por ${user.email}.`, usuario: user.email };
+                const hist = { id: uid(), tipo: 'MODIFICACIÓN', fecha: new Date(), notas: `Datos actualizados.`, usuario: user.email };
                 await legajosCollectionRef.doc(editForm.id).update({
                     numero: editForm.numero.trim(), caratula: editForm.caratula.trim(),
                     instructorId: editForm.instructorId || null, instructorNombre: inst ? inst.nombre : "Sin Asignar",
@@ -406,8 +443,8 @@
         // --- IMPRESIONES ---
         const handlePrintSalidas = (list, date) => {
             const win = window.open('', '', 'height=800,width=800');
-            const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            win.document.write(`<html><head><title>Reporte Salidas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left;vertical-align:top}th{background-color:#f2f2f2;font-size:0.8rem}tr{height:95px}.col-fixed{width:25%}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Reporte de Salidas Diario</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Destino</th><th class="col-fixed">Sello Dependencia</th><th class="col-fixed">Firma Responsable</th></tr></thead><tbody>`);
+            const dStr = date.toLocaleDateString("es-AR");
+            win.document.write(`<html><head><title>Reporte Salidas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left;vertical-align:top}th{background-color:#f2f2f2;font-size:0.8rem}tr{height:95px}.col-fixed{width:20%}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Reporte de Salidas Diario</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Destino</th><th class="col-fixed">Sello Dependencia</th><th class="col-fixed">Firma Responsable</th></tr></thead><tbody>`);
             list.forEach(l => {
                 const move = l.historial.find(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, date));
                 win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Destino: ${move?.notas.replace('Enviado a ','') || 'N/D'}</small></td><td></td><td></td></tr>`);
@@ -418,8 +455,8 @@
 
         const handlePrintEntradas = (list, date) => {
             const win = window.open('', '', 'height=800,width=800');
-            const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            win.document.write(`<html><head><title>Planilla Entradas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left}th{background-color:#f2f2f2}tr{height:60px}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Planilla de Recepción de Legajos</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Instructor</th><th>Fecha Recepción</th><th>Firma</th></tr></thead><tbody>`);
+            const dStr = date.toLocaleDateString("es-AR");
+            win.document.write(`<html><head><title>Planilla Entradas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left}th{background-color:#f2f2f2}tr{height:60px}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Planilla de Recepción</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Instructor</th><th>Fecha Recepción</th><th>Firma</th></tr></thead><tbody>`);
             list.forEach(l => { win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Instructor: ${l.instructorNombre}</small></td><td></td><td></td></tr>`); });
             win.document.write('</tbody></table></body></html>'); win.document.close();
             setTimeout(() => { win.print(); win.close(); }, 400);
@@ -427,7 +464,7 @@
 
         const handlePrintVista = () => {
             const win = window.open('', '', 'height=800,width=900');
-            const dStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+            const dStr = new Date().toLocaleDateString("es-AR");
             const sub = filtroVencidos ? "Legajos Vencidos" : "Listado Filtrado";
             win.document.write(`<html><head><title>Vista Impresa</title><style>@page{size:A4;margin:1.5cm}body{font-family:sans-serif;font-size:10pt;color:#111}.h{text-align:center;border-bottom:2px solid #000;margin-bottom:20px;padding-bottom:10px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #000;padding:7px;text-align:left}th{background:#f0f0f0;text-transform:uppercase;font-size:8pt}.vencido{color:red;font-weight:bold}</style></head><body><div style="text-align:right">Fecha: ${dStr}</div><div class="h"><h1>Juzgado de Ejecución Penal N° 2</h1><h3>${sub} ${q ? `(Filtro: "${q}")` : ''}</h3></div><table><thead><tr><th>N°</th><th>Carátula</th><th>Instructor</th><th>Ubicación</th><th>Vencimiento</th><th>Estado</th></tr></thead><tbody>`);
             filteredLegajos.forEach(l => {
@@ -449,7 +486,7 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 0 1 12 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" /></svg>
                                 </div>
                                 <div>
-                                    <h1 className="text-xl md:text-2xl font-extrabold text-white tracking-tight leading-none mb-1">EESS Dashboard</h1>
+                                    <h1 className="text-xl md:text-2xl font-extrabold text-white tracking-tight mb-1">EESS Dashboard</h1>
                                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">Juzgado de Ejecución Penal N° 2</p>
                                 </div>
                             </div>
@@ -469,6 +506,7 @@
                     </header>
 
                     <main className="max-w-7xl mx-auto px-4 lg:px-8 space-y-6">
+                        {/* PANEL BENTO BOX */}
                         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Operaciones</h2>
@@ -477,19 +515,20 @@
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Auditoría Diaria</h2>
                                 <div className="flex flex-col gap-2 flex-grow justify-center">
-                                    <button onClick={() => toggleModal('repEnt', true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">📥 ENTRADAS</button>
-                                    <button onClick={() => toggleModal('repSal', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">📤 SALIDAS</button>
+                                    <button onClick={() => toggleModal('repEnt', true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg tracking-widest">📥 ENTRADAS</button>
+                                    <button onClick={() => toggleModal('repSal', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg tracking-widest">📤 SALIDAS</button>
                                 </div>
                             </div>
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Configuración</h2>
                                 <div className="flex flex-col gap-2 flex-grow justify-center">
-                                    <button onClick={() => toggleModal('inst', true)} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">👥 PERSONAL</button>
-                                    <button onClick={() => toggleModal('trash', true)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg relative">🗑️ PAPELERA {deletedLegajos.length > 0 && <span className="ml-2 bg-white text-amber-600 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">{deletedLegajos.length}</span>}</button>
+                                    <button onClick={() => toggleModal('inst', true)} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg tracking-widest">👥 PERSONAL</button>
+                                    <button onClick={() => toggleModal('trash', true)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg relative tracking-widest">🗑️ PAPELERA {deletedLegajos.length > 0 && <span className="absolute top-1 right-1 bg-amber-500 text-slate-900 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{deletedLegajos.length}</span>}</button>
                                 </div>
                             </div>
                         </section>
 
+                        {/* HERRAMIENTAS - PROPORCIONAL */}
                         <div className="flex flex-col lg:flex-row gap-2 items-stretch">
                             <div className="relative flex-[3] group">
                                 <span className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-blue-400">
@@ -501,6 +540,7 @@
                             <button onClick={() => setBarcodeActive(!barcodeActive)} className={`flex-1 px-5 rounded-2xl font-bold text-xs uppercase shadow-lg tracking-widest ${barcodeActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-500 border border-white/5'}`}>{barcodeActive ? 'Lector On' : 'Lector Off'}</button>
                         </div>
 
+                        {/* LISTADO */}
                         <div className="space-y-4">
                             {filtroVencidos && (
                                 <div className="flex justify-between items-center bg-rose-500/10 p-3 rounded-2xl border border-rose-500/20">
@@ -550,10 +590,10 @@
                 <ReporteModal open={modals.repSal} onClose={() => toggleModal('repSal', false)} type="salidas" legajos={legajos} onPrint={handlePrintSalidas} />
                 <ReporteModal open={modals.repEnt} onClose={() => toggleModal('repEnt', false)} type="entradas" legajos={legajos} onPrint={handlePrintEntradas} />
 
-                <Modal open={modals.new} onClose={() => toggleModal('new', false)} title="Nuevo Expediente" footer={<><button onClick={() => toggleModal('new', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase">Cerrar</button><button onClick={onCrearLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Confirmar</button></>}>
+                <Modal open={modals.new} onClose={() => toggleModal('new', false)} title="Nuevo Expediente" footer={<><button onClick={() => toggleModal('new', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase">Cerrar</button><button onClick={onCrearLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest">Confirmar</button></>}>
                     <div className="space-y-4 text-sm font-medium">
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">N° Legajo</label><input value={newForm.numero} onChange={e => setNewForm({...newForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white font-mono" placeholder="Ej: 1234/2024"/></div>
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Carátula</label><textarea value={newForm.caratula} onChange={e => setNewForm({...newForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white h-24 uppercase"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">N° Legajo</label><input value={newForm.numero} onChange={e => setNewForm({...newForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white font-mono uppercase" placeholder="Ej: 1234/2024"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Carátula (Apellido, Nombre S/Delito)</label><textarea value={newForm.caratula} onChange={e => setNewForm({...newForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white h-24 uppercase"/></div>
                         <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Instructor</label><select value={newForm.instructorId} onChange={e => setNewForm({...newForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white appearance-none cursor-pointer"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
                     </div>
                 </Modal>
@@ -581,7 +621,7 @@
                                     <span className="text-[10px] font-mono text-slate-500">{fmtDateTime(h.fecha)}</span>
                                 </div>
                                 <p className="text-sm text-slate-300 mb-1">{h.notas}</p>
-                                <p className="text-[9px] font-bold text-slate-600 uppercase">👤 Usuario: {h.usuario}</p>
+                                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">👤 Realizado por: {h.usuario}</p>
                             </div>
                         ))}
                     </div>
@@ -608,7 +648,7 @@
                     <div className="overflow-x-auto text-xs"><table className="w-full"><thead className="bg-white/5 text-slate-500 uppercase tracking-widest text-[9px]"><tr><th className="p-3 text-left">Expediente</th><th className="p-3 text-left">Borrado</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{deletedLegajos.map(l => (<tr key={l.id} className="border-t border-white/5"><td className="p-3 font-bold text-white">{l.numero}<br/><span className="text-[10px] text-slate-500 font-medium normal-case">{l.caratula}</span></td><td className="p-3 text-slate-500 leading-tight">{fmtDateTime(l.deletedAt)}<br/><span className="text-[8px] uppercase text-slate-600">Por: {l.deletedBy}</span></td><td className="p-3 text-right"><button onClick={async () => { const {deletedAt, deletedBy, ...rest} = l; await legajosCollectionRef.doc(l.id).set({...rest, historial: [{id: uid(), tipo:'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado.', usuario: user.email}, ...l.historial]}); await deletedCollectionRef.doc(l.id).delete(); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-lg font-black uppercase tracking-widest">Restaurar</button></td></tr>))}</tbody></table></div>
                 </Modal>
 
-                {/* MODAL DE CONFIRMACIÓN CON MEJORA DE RELACIONADOS */}
+                {/* MODAL DE CONFIRMACIÓN CON DETALLE DE RELACIONADOS */}
                 {confirm.open && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
                         <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-white/10 shadow-2xl overflow-hidden">
@@ -616,13 +656,16 @@
                             <p className="text-slate-400 font-medium mb-6 leading-relaxed text-sm">{confirm.msg}</p>
                             
                             {confirm.relacionados.length > 0 && (
-                                <div className="mb-8 text-left bg-white/5 rounded-2xl p-4 border border-white/5">
-                                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3">Expedientes similares en el sistema:</p>
-                                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                                <div className="mb-8 text-left bg-white/5 rounded-2xl p-4 border border-white/5 shadow-inner">
+                                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                        Expedientes similares encontrados:
+                                    </p>
+                                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scroll">
                                         {confirm.relacionados.map(r => (
-                                            <div key={r.id} className="text-xs p-2 bg-black/20 rounded-lg border border-white/5">
-                                                <div className="font-bold text-white mb-1 tracking-tight">{r.numero}</div>
-                                                <div className="text-slate-400 leading-tight truncate text-[10px] font-semibold uppercase">{r.caratula}</div>
+                                            <div key={r.id} className="text-xs p-3 bg-black/40 rounded-xl border border-white/5 hover:bg-white/5 transition-colors">
+                                                <div className="font-extrabold text-blue-400 mb-1 tracking-tight">{r.numero}</div>
+                                                <div className="text-slate-300 leading-tight text-[10px] font-semibold uppercase">{r.caratula}</div>
                                             </div>
                                         ))}
                                     </div>
@@ -666,8 +709,9 @@
                     <form onSubmit={handleLogin} className="space-y-4">
                         <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email Judicial" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium tracking-tight" required />
                         <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Contraseña" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium tracking-tight" required />
-                        <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-500 shadow-xl transition-all disabled:bg-slate-800">{loading ? 'Conectando...' : 'Iniciar Sesión'}</button>
+                        <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-[2px] text-[10px] hover:bg-blue-500 shadow-xl transition-all disabled:bg-slate-800 tracking-widest">{loading ? 'AUTENTICANDO...' : 'Iniciar Sesión'}</button>
                     </form>
+                    <p className="mt-10 text-[9px] text-center font-bold text-slate-600 uppercase tracking-widest opacity-50 font-black">© 2025 Catamarca - Poder Judicial</p>
                 </div>
             </div>
         );
