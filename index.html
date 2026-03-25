@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gestión de Legajos v26.5 (Auditoría de Movimientos Real)</title>
+    <title>Gestión de Legajos v26.8 (Corrección de Sintaxis)</title>
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -55,7 +55,6 @@
             border-left: 4px solid #3b82f6 !important;
         }
 
-        /* Scrollbar personalizada */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
@@ -67,9 +66,6 @@
 
     <script type="text/babel">
     
-    // =======================================================
-    //  INICIALIZACIÓN DE FIREBASE
-    // =======================================================
     const firebaseConfig = {
       apiKey: "AIzaSyDCCruZk6UAf2ybjJG6gihuUrJMZduhUI0",
       authDomain: "gestor-legajos-eess.firebaseapp.com",
@@ -81,31 +77,24 @@
 
     let db, auth;
     try {
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         auth = firebase.auth();
     } catch (e) {
-        console.error("Firebase Init Error:", e);
+        console.error("Firebase Error:", e);
     }
 
     const legajosCollectionRef = db.collection("legajos");
     const deletedCollectionRef = db.collection("legajos_eliminados");
     const instructoresCollectionRef = db.collection("instructores");
 
-    // =======================================================
-    //  UTILIDADES
-    // =======================================================
     const DEPENDENCIAS = ["Fiscalía Correccional N° 1", "Fiscalía Correccional N° 2", "Fiscalía Correccional N° 3","Defensoría N° 1", "Defensoría N° 2", "Defensoría N° 3", "Defensoría N° 4", "Defensoría N° 5", "Defensoría N° 6","Gabinete Técnico de Ejecución", "Corte de Justicia", "Otra"];
-
     const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
     const fmtDateTime = (d) => {
         if (!d) return "—";
         const date = d.toDate ? d.toDate() : new Date(d);
-        if (isNaN(date.getTime())) return "—";
-        return date.toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" });
+        return isNaN(date.getTime()) ? "—" : date.toLocaleString("es-AR", { timeZone: "America/Argentina/Catamarca" });
     };
 
     const isOverdue = (l) => {
@@ -123,23 +112,19 @@
 
     const dateToInputString = (date = new Date()) => {
         const d = new Date(date);
-        const pad = (num) => num.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
     };
 
     const dateToInputFormat = (date) => {
         if (!date) return '';
         const d = date.toDate ? date.toDate() : new Date(date);
-        const pad = (num) => num.toString().padStart(2, '0');
+        const pad = (n) => n.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
 
     const validateNumeroExpediente = (v) => /^\d{1,10}\/\d{4}$/.test((v || "").trim());
     const addDays = (dateObj, days) => { const d = new Date(dateObj); d.setDate(d.getDate() + Number(days || 0)); return d; };
 
-    // =======================================================
-    //  COMPONENTES UI
-    // =======================================================
     function BackgroundGradientAnimation() { return <div className="background-gradient-animation"></div>; }
 
     const Pill = ({ children, color = "gray" }) => {
@@ -162,11 +147,7 @@
             purple: "bg-purple-600 hover:bg-purple-500 text-white",
             yellow: "bg-amber-600 hover:bg-amber-500 text-white"
         };
-        return (
-            <button onClick={onClick} title={title} className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center ${colors[color]}`}>
-                {icon}
-            </button>
-        );
+        return <button onClick={onClick} title={title} className={`p-2 rounded-lg transition-all active:scale-95 flex items-center justify-center ${colors[color]}`}>{icon}</button>;
     };
 
     const Modal = ({ open, onClose, title, children, footer, maxWidth = "max-w-xl" }) => {
@@ -185,6 +166,8 @@
         );
     };
 
+    // --- COMPONENTES DE MODAL ---
+
     function BarcodeModal({ open, onClose, legajo }) {
         React.useEffect(() => {
             if (open && legajo) {
@@ -195,19 +178,10 @@
         const handlePrint = () => {
             const printWindow = window.open('', '', 'height=600,width=800');
             printWindow.document.write('<html><head><title>Imprimir Código de Barras</title>');
-            printWindow.document.write(`
-                <style>
-                    @page { size: A4; margin: 0; }
-                    body { margin: 0; font-family: sans-serif; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; }
-                    .container { margin-bottom: 1.5cm; margin-right: 1.5cm; }
-                </style>
-            `);
-            printWindow.document.write('</head><body>');
-            printWindow.document.write('<div class="container"><svg id="barcode-print"></svg></div>');
+            printWindow.document.write(`<style>@page { size: A4; margin: 0; } body { margin: 0; font-family: sans-serif; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; } .container { margin-bottom: 1.5cm; margin-right: 1.5cm; }</style>`);
+            printWindow.document.write('</head><body><div class="container"><svg id="barcode-print"></svg></div>');
             printWindow.document.write('<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>');
-            printWindow.document.write('<script>');
-            printWindow.document.write(`try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 100, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 300); } catch(e) { window.close(); }`);
-            printWindow.document.write('<\/script></body></html>');
+            printWindow.document.write(`<script>try { JsBarcode("#barcode-print", "${legajo.numero}", { format: "CODE128", lineColor: "#000", width: 2, height: 100, displayValue: false }); setTimeout(() => { window.print(); window.close(); }, 300); } catch(e) { window.close(); }<\/script></body></html>`);
             printWindow.document.close();
         };
         if (!open || !legajo) return null;
@@ -216,7 +190,7 @@
                    footer={<><button className="px-4 py-2 bg-slate-700 rounded-lg text-xs font-bold" onClick={onClose}>Cerrar</button><button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold" onClick={handlePrint}>🖨️ Imprimir</button></>}>
                 <div className="text-center p-6 space-y-4">
                     <div className="flex justify-center bg-white p-4 rounded-lg shadow-inner"><svg id="barcode-svg-display"></svg></div>
-                    <p className="text-sm text-slate-400 italic">Posición de impresión: Esquina inferior derecha (A4).</p>
+                    <p className="text-sm text-slate-400 italic">Posición: Esquina inferior derecha (A4).</p>
                 </div>
             </Modal>
         );
@@ -242,7 +216,7 @@
                             <li key={i.id} className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
                                 {editing?.id === i.id ? (
                                     <input type="text" value={editing.nombre} onChange={e => setEditing({...editing, nombre: e.target.value})} className="bg-slate-800 border border-white/20 p-1 rounded w-full mr-2 text-white"/>
-                                ) : ( <span>{i.nombre}</span> )}
+                                ) : ( <span className="text-slate-200">{i.nombre}</span> )}
                                 <div className="flex gap-1">
                                     {editing?.id === i.id ? (
                                         <button onClick={() => { onEdit(editing.id, editing.nombre); setEditing(null); }} className="px-3 py-1 bg-green-600 text-white rounded text-xs font-bold">OK</button>
@@ -250,7 +224,7 @@
                                         <>
                                             <button onClick={() => setEditing(i)} className="px-3 py-1 bg-slate-600 text-white rounded text-xs font-bold">Editar</button>
                                             <button onClick={() => {
-                                                if (legajos.some(l => l.instructorId === i.id)) onAlert('El instructor tiene legajos asignados.');
+                                                if (legajos.some(l => l.instructorId === i.id)) onAlert('Posee legajos asignados.');
                                                 else onDelete(i.id);
                                             }} className="px-3 py-1 bg-rose-600 text-white rounded text-xs font-bold">Borrar</button>
                                         </>
@@ -267,21 +241,14 @@
     function ReporteModal({ open, onClose, type, legajos, onPrint }) {
         const [selected, setSelected] = React.useState(new Set());
         const [date, setDate] = React.useState(dateToInputString());
-        
-        // --- MEJORA: Lógica de auditoría real ---
         const filtered = React.useMemo(() => {
             const target = new Date(date + 'T00:00:00');
             return legajos.filter(l => l.historial.some(h => {
-                // Si es reporte de salidas, buscar SOLO tipos de movimiento 'SALIDA'
                 if (type === 'salidas') return h.tipo === 'SALIDA' && isSameDay(h.fecha, target);
-                // Si es reporte de entradas, buscar SOLO tipos de movimiento 'ENTRADA' 
-                // (Se quita 'CREACIÓN' para que no figuren archivos nuevos que aún no se han movido)
                 return h.tipo === 'ENTRADA' && isSameDay(h.fecha, target);
             }));
         }, [legajos, date, type]);
-
         React.useEffect(() => { if(open) setSelected(new Set(filtered.map(l => l.id))); }, [open, filtered]);
-        
         return (
             <Modal open={open} onClose={onClose} title={type === 'salidas' ? "Libro de Salidas" : "Libro de Entradas"} footer={<><button onClick={onClose} className="px-4 py-2 bg-slate-700 rounded-lg text-xs font-bold">Cerrar</button><button onClick={() => onPrint(filtered.filter(l => selected.has(l.id)), new Date(date + 'T00:00:00'))} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold" disabled={selected.size === 0}>Generar ({selected.size})</button></>}>
                 <div className="mb-4"><label className="text-[10px] font-black uppercase text-slate-500 mb-1 block tracking-widest">Fecha</label><input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white outline-none"/></div>
@@ -292,7 +259,7 @@
                             <div className="text-sm text-slate-200"><strong>{l.numero}</strong> - {l.caratula}</div>
                         </div>
                     ))}
-                    {filtered.length === 0 && <p className="text-center py-6 text-slate-500 italic">No hay movimientos registrados para esta fecha.</p>}
+                    {filtered.length === 0 && <p className="text-center py-6 text-slate-500 italic font-medium">Sin movimientos registrados para esta fecha.</p>}
                 </div>
             </Modal>
         );
@@ -313,28 +280,20 @@
         const [highlightedId, setHighlightedId] = React.useState(null);
         const [filtroVencidos, setFiltroVencidos] = React.useState(false);
         
-        // Estados Modales
-        const [modals, setModals] = React.useState({ 
-            new: false, edit: false, salida: false, history: false, 
-            barcode: false, trash: false, inst: false, repSal: false, repEnt: false 
-        });
+        const [modals, setModals] = React.useState({ new: false, edit: false, salida: false, history: false, barcode: false, trash: false, inst: false, repSal: false, repEnt: false });
         const toggleModal = (key, val) => setModals(prev => ({ ...prev, [key]: val }));
 
-        // Formularios
         const [newForm, setNewForm] = React.useState({ numero: "", caratula: "", instructorId: "" });
         const [editForm, setEditForm] = React.useState({ id: null, numero: "", caratula: "", instructorId: "", vencimiento: "", ubicacionActual: "" });
         const [salidaForm, setSalidaForm] = React.useState({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" });
         
-        const [confirm, setConfirm] = React.useState({ open: false, title: '', msg: '', onOk: null, color: "bg-blue-600" });
+        const [confirm, setConfirm] = React.useState({ open: false, title: '', msg: '', onOk: null, color: "bg-blue-600", relacionados: [] });
         const [alertState, setAlertState] = React.useState({ open: false, title: '', msg: '' });
 
         const legajoRefs = React.useRef({});
 
         React.useEffect(() => {
-            const unsubLegs = legajosCollectionRef.orderBy("createdAt", "desc").onSnapshot(snap => {
-                setLegajos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                setLoading(false);
-            });
+            const unsubLegs = legajosCollectionRef.orderBy("createdAt", "desc").onSnapshot(snap => { setLegajos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false); });
             const unsubDels = deletedCollectionRef.orderBy("deletedAt", "desc").onSnapshot(snap => setDeletedLegajos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
             const unsubInst = instructoresCollectionRef.orderBy("nombre", "asc").onSnapshot(snap => setInstructores(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
             return () => { unsubLegs(); unsubDels(); unsubInst(); };
@@ -347,7 +306,7 @@
             return term ? base.filter(l => `${l.numero} ${l.caratula}`.toLowerCase().includes(term)) : base;
         }, [legajos, q, filtroVencidos, legajosVencidos]);
 
-        // Manejador del Escáner
+        // Lógica del Escáner
         React.useEffect(() => {
             let buffer = ''; let last = 0;
             const handleKey = (e) => {
@@ -363,9 +322,7 @@
                             if (filtroVencidos) setFiltroVencidos(false);
                             setTimeout(() => legajoRefs.current[found.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
                             setTimeout(() => { setQ(''); setScanned(false); setHighlightedId(null); }, 3000);
-                        } else {
-                            setAlertState({ open: true, title: 'No Encontrado', msg: `Legajo "${clean}" no hallado.` });
-                        }
+                        } else setAlertState({ open: true, title: 'No Encontrado', msg: `Legajo "${clean}" no hallado.` });
                     }
                     buffer = '';
                 } else if (e.key.length === 1) buffer += e.key;
@@ -375,24 +332,49 @@
             return () => window.removeEventListener('keydown', handleKey);
         }, [legajos, barcodeActive, filtroVencidos]);
 
-        const handleConfirm = (title, msg, onOk, color = "bg-blue-600") => setConfirm({ open: true, title, msg, onOk, color });
+        const handleConfirm = (title, msg, onOk, color = "bg-blue-600", relacionados = []) => setConfirm({ open: true, title, msg, onOk, color, relacionados });
 
         // --- ACCIONES ---
+
         const onCrearLegajo = async () => {
             const num = newForm.numero.trim();
-            if (!validateNumeroExpediente(num)) return setAlertState({ open: true, title: "Error", msg: "Formato de N° inválido." });
-            handleConfirm("Crear Legajo", "¿Desea dar de alta este expediente?", async () => {
+            const carat = newForm.caratula.trim();
+            
+            if (!validateNumeroExpediente(num)) return setAlertState({ open: true, title: "Error", msg: "Formato de N° inválido (ej. 1234/2025)." });
+            
+            // 1. Control exacto por N° de Legajo
+            try {
+                const snapshot = await legajosCollectionRef.where("numero", "==", num).get();
+                if (!snapshot.empty) return setAlertState({ open: true, title: "Legajo Duplicado", msg: `Ya existe un expediente con el número ${num}.` });
+            } catch (e) { console.error(e); }
+
+            // 2. Control de similitud por Carátula
+            const cleanText = (t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s]/gi, '');
+            const keywords = cleanText(carat).split(' ').filter(w => w.length > 3 && !['contra', 'delito', 'sobre', 'fiscalia', 'defensoria'].includes(w));
+            
+            const parecidos = legajos.filter(l => {
+                const target = cleanText(l.caratula);
+                return keywords.some(k => target.includes(k));
+            }).slice(0, 5);
+
+            const title = parecidos.length > 0 ? "⚠️ Posible Duplicidad Detectada" : "Confirmar Creación";
+            const color = parecidos.length > 0 ? "bg-amber-600" : "bg-blue-600";
+            const msg = parecidos.length > 0 
+                ? "Se encontraron expedientes con carátulas similares. Revise la lista debajo para evitar duplicados innecesarios antes de confirmar." 
+                : "¿Desea dar de alta este expediente en el sistema?";
+
+            handleConfirm(title, msg, async () => {
                 const inst = instructores.find(i => i.id === newForm.instructorId);
                 const hist = { id: uid(), tipo: 'CREACIÓN', fecha: new Date(), notas: 'Legajo creado.', usuario: user.email };
                 await legajosCollectionRef.add({
-                    numero: num, caratula: newForm.caratula.trim(), 
+                    numero: num, caratula: carat, 
                     instructorId: newForm.instructorId || null, instructorNombre: inst ? inst.nombre : "Sin Asignar",
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(), enTransito: false,
                     ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: [hist]
                 });
                 toggleModal('new', false); setNewForm({numero:"", caratula:"", instructorId:""});
                 setConfirm({ ...confirm, open: false });
-            });
+            }, color, parecidos);
         };
 
         const onEditarLegajo = async () => {
@@ -425,7 +407,7 @@
         const handlePrintSalidas = (list, date) => {
             const win = window.open('', '', 'height=800,width=800');
             const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            win.document.write(`<html><head><title>Reporte Salidas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left;vertical-align:top}th{background-color:#f2f2f2;font-size:0.8rem}tr{height:95px}.col-fixed{width:20%}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Reporte de Salidas Diario</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Destino</th><th class="col-fixed">Sello Dependencia</th><th class="col-fixed">Firma Responsable</th></tr></thead><tbody>`);
+            win.document.write(`<html><head><title>Reporte Salidas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left;vertical-align:top}th{background-color:#f2f2f2;font-size:0.8rem}tr{height:95px}.col-fixed{width:25%}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Reporte de Salidas Diario</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Destino</th><th class="col-fixed">Sello Dependencia</th><th class="col-fixed">Firma Responsable</th></tr></thead><tbody>`);
             list.forEach(l => {
                 const move = l.historial.find(h => h.tipo === 'SALIDA' && isSameDay(h.fecha, date));
                 win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Destino: ${move?.notas.replace('Enviado a ','') || 'N/D'}</small></td><td></td><td></td></tr>`);
@@ -437,7 +419,7 @@
         const handlePrintEntradas = (list, date) => {
             const win = window.open('', '', 'height=800,width=800');
             const dStr = date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Catamarca" });
-            win.document.write(`<html><head><title>Planilla Entradas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left}th{background-color:#f2f2f2}tr{height:60px}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Planilla de Recepción</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Instructor</th><th>Fecha Recepción</th><th>Firma</th></tr></thead><tbody>`);
+            win.document.write(`<html><head><title>Planilla Entradas</title><style>@page{size:A4;margin:2cm}body{font-family:sans-serif}.header{text-align:center;position:relative;margin-bottom:2rem}.header h1{margin:0;font-size:1.2rem}.date{position:absolute;top:0;right:0;font-size:0.9rem}table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{border:1px solid #000;padding:10px;text-align:left}th{background-color:#f2f2f2}tr{height:60px}</style></head><body><div class="header"><h1>Juzgado de Ejecución Penal N° 2</h1><div class="date">Fecha: ${dStr}</div></div><h2>Planilla de Recepción de Legajos</h2><table><thead><tr><th>Legajo N°</th><th>Carátula / Instructor</th><th>Fecha Recepción</th><th>Firma</th></tr></thead><tbody>`);
             list.forEach(l => { win.document.write(`<tr><td><strong>${l.numero}</strong></td><td>${l.caratula}<br/><small>Instructor: ${l.instructorNombre}</small></td><td></td><td></td></tr>`); });
             win.document.write('</tbody></table></body></html>'); win.document.close();
             setTimeout(() => { win.print(); win.close(); }, 400);
@@ -463,7 +445,7 @@
                     <header className="glass-panel border-b border-white/10 p-4 mb-6 sticky top-0 z-50">
                         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="flex items-center gap-4">
-                                <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-900/40">
+                                <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 0 1 12 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" /></svg>
                                 </div>
                                 <div>
@@ -471,13 +453,13 @@
                                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">Juzgado de Ejecución Penal N° 2</p>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <div className="text-right hidden sm:block border-r border-white/10 pr-4">
+                            <div className="flex items-center gap-3 text-right">
+                                <div className="hidden sm:block border-r border-white/10 pr-4">
                                     <p className="text-xs font-semibold text-slate-300 leading-none mb-1">{user.email}</p>
                                     <button onClick={onSignOut} className="text-[10px] text-rose-400 font-bold hover:text-rose-300 uppercase tracking-widest">Salir</button>
                                 </div>
                                 {legajosVencidos.length > 0 && (
-                                    <button onClick={() => setFiltroVencidos(true)} className="flex items-center gap-2 px-3 py-2 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl animate-pulse hover:bg-rose-500/30">
+                                    <button onClick={() => setFiltroVencidos(true)} className="flex items-center gap-2 px-3 py-2 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl animate-pulse">
                                         <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
                                         <span className="text-xs font-bold">{legajosVencidos.length} VENCIDOS</span>
                                     </button>
@@ -487,53 +469,42 @@
                     </header>
 
                     <main className="max-w-7xl mx-auto px-4 lg:px-8 space-y-6">
-                        {/* PANEL BENTO BOX */}
                         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Operaciones</h2>
-                                <div className="flex flex-col gap-2 flex-grow justify-center">
-                                    <button onClick={() => toggleModal('new', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-900/20">➕ NUEVO LEGAJO</button>
-                                </div>
+                                <div className="flex flex-col gap-2 flex-grow justify-center"><button onClick={() => toggleModal('new', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">➕ NUEVO LEGAJO</button></div>
                             </div>
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Auditoría Diaria</h2>
                                 <div className="flex flex-col gap-2 flex-grow justify-center">
-                                    <button onClick={() => toggleModal('repEnt', true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-900/20">📥 ENTRADAS</button>
-                                    <button onClick={() => toggleModal('repSal', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-900/20">📤 SALIDAS</button>
+                                    <button onClick={() => toggleModal('repEnt', true)} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">📥 ENTRADAS</button>
+                                    <button onClick={() => toggleModal('repSal', true)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">📤 SALIDAS</button>
                                 </div>
                             </div>
                             <div className="glass-panel p-5 rounded-3xl flex flex-col shadow-lg h-full">
                                 <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Configuración</h2>
                                 <div className="flex flex-col gap-2 flex-grow justify-center">
-                                    <button onClick={() => toggleModal('inst', true)} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-purple-900/20">👥 PERSONAL</button>
-                                    <button onClick={() => toggleModal('trash', true)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-amber-900/20 relative">
-                                        🗑️ PAPELERA
-                                        {deletedLegajos.length > 0 && <span className="ml-2 bg-white text-amber-600 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">{deletedLegajos.length}</span>}
-                                    </button>
+                                    <button onClick={() => toggleModal('inst', true)} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg">👥 PERSONAL</button>
+                                    <button onClick={() => toggleModal('trash', true)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black text-xs uppercase transition-all active:scale-95 shadow-lg relative">🗑️ PAPELERA {deletedLegajos.length > 0 && <span className="ml-2 bg-white text-amber-600 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">{deletedLegajos.length}</span>}</button>
                                 </div>
                             </div>
                         </section>
 
-                        {/* BARRA DE HERRAMIENTAS - PROPORCIONAL */}
                         <div className="flex flex-col lg:flex-row gap-2 items-stretch">
                             <div className="relative flex-[3] group">
-                                <span className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-blue-400 transition-colors">
+                                <span className="absolute inset-y-0 left-4 flex items-center text-slate-500 group-focus-within:text-blue-400">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                                 </span>
                                 <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar expediente o carátula..." className={`w-full pl-12 pr-4 py-4 glass-panel rounded-2xl outline-none border-transparent focus:border-blue-500/50 transition-all text-sm font-medium text-white ${scanned ? 'barcode-scanned' : ''}`}/>
                             </div>
-                            <button onClick={handlePrintVista} className="flex-1 px-5 glass-panel rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white/10 transition-colors py-4 lg:py-0 shadow-lg">🖨️ Imprimir</button>
-                            <button onClick={() => setBarcodeActive(!barcodeActive)} className={`flex-1 px-5 rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all py-4 lg:py-0 shadow-lg ${barcodeActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-500 border border-white/5'}`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
-                                {barcodeActive ? 'Lector On' : 'Lector Off'}
-                            </button>
+                            <button onClick={handlePrintVista} className="flex-1 px-5 glass-panel rounded-2xl font-bold text-xs uppercase hover:bg-white/10 shadow-lg tracking-widest">🖨️ Imprimir</button>
+                            <button onClick={() => setBarcodeActive(!barcodeActive)} className={`flex-1 px-5 rounded-2xl font-bold text-xs uppercase shadow-lg tracking-widest ${barcodeActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-500 border border-white/5'}`}>{barcodeActive ? 'Lector On' : 'Lector Off'}</button>
                         </div>
 
-                        {/* LISTADO */}
                         <div className="space-y-4">
                             {filtroVencidos && (
                                 <div className="flex justify-between items-center bg-rose-500/10 p-3 rounded-2xl border border-rose-500/20">
-                                    <span className="text-xs font-bold text-rose-400 flex items-center gap-2"><span className="w-2 h-2 bg-rose-500 rounded-full"></span> SÓLO LEGAJOS VENCIDOS</span>
+                                    <span className="text-xs font-bold text-rose-400 flex items-center gap-2">⚠️ SÓLO LEGAJOS VENCIDOS</span>
                                     <button onClick={() => setFiltroVencidos(false)} className="text-[10px] font-black uppercase text-rose-400 hover:underline px-2">Limpiar</button>
                                 </div>
                             )}
@@ -541,30 +512,20 @@
                             <div className="hidden md:block overflow-hidden rounded-3xl glass-panel shadow-2xl border border-white/10">
                                 <table className="w-full text-sm">
                                     <thead className="bg-white/5 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                                        <tr>
-                                            <th className="p-4 text-left">N° Legajo</th>
-                                            <th className="p-4 text-left">Carátula / Instructor</th>
-                                            <th className="p-4 text-left">Localización</th>
-                                            <th className="p-4 text-left">Vencimiento</th>
-                                            <th className="p-4 text-left">Estado</th>
-                                            <th className="p-4 text-right">Acciones</th>
-                                        </tr>
+                                        <tr><th className="p-4 text-left">N° Legajo</th><th className="p-4 text-left">Carátula / Instructor</th><th className="p-4 text-left">Localización</th><th className="p-4 text-left">Vencimiento</th><th className="p-4 text-left">Estado</th><th className="p-4 text-right">Acciones</th></tr>
                                     </thead>
                                     <tbody>
                                         {filteredLegajos.map(l => (
                                             <tr key={l.id} ref={el => legajoRefs.current[l.id] = el} className={`border-t border-white/5 transition-all ${l.id === highlightedId ? 'highlighted-row' : ''}`}>
                                                 <td className="p-4 font-extrabold text-white text-lg">{l.numero}</td>
-                                                <td className="p-4">
-                                                    <div className="font-semibold text-slate-200 leading-tight mb-1">{l.caratula}</div>
-                                                    <div className="text-[9px] font-bold text-slate-500 uppercase">👤 {l.instructorNombre}</div>
-                                                </td>
+                                                <td className="p-4"><div className="font-semibold text-slate-200 mb-1">{l.caratula}</div><div className="text-[9px] font-bold text-slate-500 uppercase">👤 {l.instructorNombre}</div></td>
                                                 <td className="p-4 font-semibold text-white">{l.ubicacionActual?.lugar}</td>
                                                 <td className="p-4 font-semibold text-white">{fmtDateTime(l.vencimiento)}</td>
                                                 <td className="p-4">{isOverdue(l) ? <Pill color="red">Vencido</Pill> : l.enTransito ? <Pill color="blue">Tránsito</Pill> : <Pill color="green">Juzgado</Pill>}</td>
                                                 <td className="p-4 text-right">
                                                     <div className="flex gap-1 justify-end">
                                                         {l.enTransito ? (
-                                                            <ActionButton onClick={() => handleConfirm("Registrar Entrada", "¿Confirma reingreso?", async () => { await legajosCollectionRef.doc(l.id).update({ enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: firebase.firestore.FieldValue.arrayUnion({ id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email }) }); setConfirm({ ...confirm, open: false }); }, "bg-emerald-600")} icon="📥" color="green" />
+                                                            <ActionButton onClick={() => handleConfirm("Entrada", "¿Confirma reingreso?", async () => { await legajosCollectionRef.doc(l.id).update({ enTransito: false, ubicacionActual: { lugar: "Juzgado", desde: new Date() }, vencimiento: null, historial: firebase.firestore.FieldValue.arrayUnion({ id: uid(), tipo: 'ENTRADA', fecha: new Date(), notas: 'Regresa a Juzgado.', usuario: user.email }) }); setConfirm({ ...confirm, open: false }); }, "bg-emerald-600")} icon="📥" color="green" />
                                                         ) : (
                                                             <ActionButton onClick={() => { setCurrent(l); setSalidaForm({ dependencia: DEPENDENCIAS[0], otraDependencia: "", plazoDias: "" }); toggleModal('salida', true); }} icon="📤" color="blue" />
                                                         )}
@@ -589,21 +550,21 @@
                 <ReporteModal open={modals.repSal} onClose={() => toggleModal('repSal', false)} type="salidas" legajos={legajos} onPrint={handlePrintSalidas} />
                 <ReporteModal open={modals.repEnt} onClose={() => toggleModal('repEnt', false)} type="entradas" legajos={legajos} onPrint={handlePrintEntradas} />
 
-                <Modal open={modals.new} onClose={() => toggleModal('new', false)} title="Nuevo Expediente" footer={<><button onClick={() => toggleModal('new', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase">Cancelar</button><button onClick={onCrearLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Confirmar</button></>}>
+                <Modal open={modals.new} onClose={() => toggleModal('new', false)} title="Nuevo Expediente" footer={<><button onClick={() => toggleModal('new', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase">Cerrar</button><button onClick={onCrearLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Confirmar</button></>}>
                     <div className="space-y-4 text-sm font-medium">
                         <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">N° Legajo</label><input value={newForm.numero} onChange={e => setNewForm({...newForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white font-mono" placeholder="Ej: 1234/2024"/></div>
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Carátula</label><textarea value={newForm.caratula} onChange={e => setNewForm({...newForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white h-24"/></div>
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Instructor</label><select value={newForm.instructorId} onChange={e => setNewForm({...newForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Carátula</label><textarea value={newForm.caratula} onChange={e => setNewForm({...newForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white h-24 uppercase"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Instructor</label><select value={newForm.instructorId} onChange={e => setNewForm({...newForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-2xl p-4 text-white appearance-none cursor-pointer"><option value="">Sin Asignar</option>{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
                     </div>
                 </Modal>
 
                 <Modal open={modals.edit} onClose={() => toggleModal('edit', false)} title="Editar Datos" footer={<><button onClick={() => toggleModal('edit', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cerrar</button><button onClick={onEditarLegajo} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase">Guardar</button></>}>
                     <div className="space-y-4 text-sm font-medium">
                         <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Número</label><input value={editForm.numero} onChange={e => setEditForm({...editForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white font-mono"/></div>
+                            <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Número</label><input value={editForm.numero} onChange={e => setEditForm({...editForm, numero: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white font-mono uppercase"/></div>
                             <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Instructor</label><select value={editForm.instructorId} onChange={e => setEditForm({...editForm, instructorId: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white">{instructores.map(i => <option key={i.id} value={i.id}>{i.nombre}</option>)}</select></div>
                         </div>
-                        <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Carátula</label><textarea value={editForm.caratula} onChange={e => setEditForm({...editForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white h-20"/></div>
+                        <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Carátula</label><textarea value={editForm.caratula} onChange={e => setEditForm({...editForm, caratula: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white h-20 uppercase"/></div>
                         <div><label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Ubicación Manual</label><input value={editForm.ubicacionActual} onChange={e => setEditForm({...editForm, ubicacionActual: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white"/></div>
                         {current?.enTransito && (
                             <div><label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">Vencimiento</label><input type="datetime-local" value={editForm.vencimiento} onChange={e => setEditForm({...editForm, vencimiento: e.target.value})} className="w-full bg-slate-950/50 border border-blue-500/30 rounded-xl p-3 text-white"/></div>
@@ -611,7 +572,7 @@
                     </div>
                 </Modal>
 
-                <Modal open={modals.history} onClose={() => toggleModal('history', false)} title={`Historial: ${current?.numero}`} footer={<button onClick={() => toggleModal('history', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cerrar</button>}>
+                <Modal open={modals.history} onClose={() => toggleModal('history', false)} title={`Historial: ${current?.numero}`} footer={<button onClick={() => toggleModal('history', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase tracking-widest">Cerrar</button>}>
                     <div className="space-y-4">
                         {current?.historial && [...current.historial].sort((a,b) => (b.fecha?.toMillis ? b.fecha.toMillis() : new Date(b.fecha).getTime()) - (a.fecha?.toMillis ? a.fecha.toMillis() : new Date(a.fecha).getTime())).map(h => (
                             <div key={h.id} className="p-4 bg-white/5 rounded-2xl border border-white/5">
@@ -626,7 +587,7 @@
                     </div>
                 </Modal>
 
-                <Modal open={modals.salida} onClose={() => toggleModal('salida', false)} title="Registrar Salida" footer={<><button onClick={() => toggleModal('salida', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold">Cancelar</button><button onClick={async () => {
+                <Modal open={modals.salida} onClose={() => toggleModal('salida', false)} title="Registrar Salida" footer={<><button onClick={() => toggleModal('salida', false)} className="px-6 py-2.5 glass-panel rounded-xl text-xs font-bold uppercase tracking-widest">Cancelar</button><button onClick={async () => {
                     const dest = salidaForm.dependencia === 'Otra' ? salidaForm.otraDependencia.trim() : salidaForm.dependencia;
                     if(!dest) return setAlertState({open:true, title:"Error", msg:"Defina un destino."});
                     handleConfirm("Autorizar Salida", `¿Autoriza el envío a ${dest}?`, async () => {
@@ -635,7 +596,7 @@
                         await legajosCollectionRef.doc(current.id).update({ enTransito: true, ubicacionActual: { lugar: dest, desde: now }, vencimiento: venc, historial: firebase.firestore.FieldValue.arrayUnion(hist) });
                         toggleModal('salida', false); setConfirm({ ...confirm, open: false });
                     });
-                }} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase shadow-lg shadow-blue-900/40">Confirmar Salida</button></>}>
+                }} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase shadow-lg shadow-blue-900/40 tracking-widest">Confirmar</button></>}>
                     <div className="space-y-4 text-sm font-medium">
                         <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Destino</label><select value={salidaForm.dependencia} onChange={e => setSalidaForm({...salidaForm, dependencia: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white">{DEPENDENCIAS.map(d => <option key={d} value={d} className="bg-slate-900">{d}</option>)}</select></div>
                         {salidaForm.dependencia === 'Otra' && (<div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Especifique</label><input value={salidaForm.otraDependencia} onChange={e => setSalidaForm({...salidaForm, otraDependencia: e.target.value})} className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-white"/></div>)}
@@ -643,27 +604,42 @@
                     </div>
                 </Modal>
 
-                <Modal open={modals.trash} onClose={() => toggleModal('trash', false)} title="Registro de Eliminados" maxWidth="max-w-4xl" footer={<button onClick={() => toggleModal('trash', false)} className="px-6 py-2 bg-slate-700 rounded-xl text-xs font-bold">Cerrar</button>}>
-                    <div className="overflow-x-auto text-xs"><table className="w-full"><thead className="bg-white/5 text-slate-500 uppercase tracking-widest"><tr><th className="p-3 text-left">Expediente</th><th className="p-3 text-left">Borrado</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{deletedLegajos.map(l => (<tr key={l.id} className="border-t border-white/5"><td className="p-3 font-bold text-white">{l.numero}<br/><span className="text-[10px] text-slate-500 font-medium normal-case">{l.caratula}</span></td><td className="p-3 text-slate-500 leading-tight">{fmtDateTime(l.deletedAt)}<br/><span className="text-[8px] uppercase text-slate-600">Por: {l.deletedBy}</span></td><td className="p-3 text-right"><button onClick={async () => { const {deletedAt, deletedBy, ...rest} = l; await legajosCollectionRef.doc(l.id).set({...rest, historial: [{id: uid(), tipo:'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado.', usuario: user.email}, ...l.historial]}); await deletedCollectionRef.doc(l.id).delete(); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-lg font-black uppercase">Restaurar</button></td></tr>))}</tbody></table></div>
+                <Modal open={modals.trash} onClose={() => toggleModal('trash', false)} title="Registro de Eliminados" maxWidth="max-w-4xl" footer={<button onClick={() => toggleModal('trash', false)} className="px-6 py-2 bg-slate-700 rounded-xl text-xs font-bold uppercase tracking-widest">Cerrar</button>}>
+                    <div className="overflow-x-auto text-xs"><table className="w-full"><thead className="bg-white/5 text-slate-500 uppercase tracking-widest text-[9px]"><tr><th className="p-3 text-left">Expediente</th><th className="p-3 text-left">Borrado</th><th className="p-3 text-right">Acción</th></tr></thead><tbody>{deletedLegajos.map(l => (<tr key={l.id} className="border-t border-white/5"><td className="p-3 font-bold text-white">{l.numero}<br/><span className="text-[10px] text-slate-500 font-medium normal-case">{l.caratula}</span></td><td className="p-3 text-slate-500 leading-tight">{fmtDateTime(l.deletedAt)}<br/><span className="text-[8px] uppercase text-slate-600">Por: {l.deletedBy}</span></td><td className="p-3 text-right"><button onClick={async () => { const {deletedAt, deletedBy, ...rest} = l; await legajosCollectionRef.doc(l.id).set({...rest, historial: [{id: uid(), tipo:'RESTAURACIÓN', fecha: new Date(), notas: 'Restaurado.', usuario: user.email}, ...l.historial]}); await deletedCollectionRef.doc(l.id).delete(); }} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-lg font-black uppercase tracking-widest">Restaurar</button></td></tr>))}</tbody></table></div>
                 </Modal>
 
+                {/* MODAL DE CONFIRMACIÓN CON MEJORA DE RELACIONADOS */}
                 {confirm.open && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-white/10 shadow-2xl">
-                            <h3 className="text-xl font-black text-white mb-3 tracking-tighter">{confirm.title}</h3>
-                            <p className="text-slate-400 font-medium mb-8 leading-relaxed text-sm">{confirm.msg}</p>
-                            <div className="flex gap-3"><button onClick={() => setConfirm({ ...confirm, open: false })} className="flex-1 py-3 glass-panel rounded-2xl font-bold text-xs uppercase tracking-widest text-slate-300">Cerrar</button><button onClick={confirm.onOk} className={`flex-1 py-3 ${confirm.color} text-white rounded-2xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-blue-900/40 transition-transform active:scale-95`}>Continuar</button></div>
+                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-white/10 shadow-2xl overflow-hidden">
+                            <h3 className="text-xl font-black text-white mb-3 tracking-tighter uppercase">{confirm.title}</h3>
+                            <p className="text-slate-400 font-medium mb-6 leading-relaxed text-sm">{confirm.msg}</p>
+                            
+                            {confirm.relacionados.length > 0 && (
+                                <div className="mb-8 text-left bg-white/5 rounded-2xl p-4 border border-white/5">
+                                    <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3">Expedientes similares en el sistema:</p>
+                                    <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                                        {confirm.relacionados.map(r => (
+                                            <div key={r.id} className="text-xs p-2 bg-black/20 rounded-lg border border-white/5">
+                                                <div className="font-bold text-white mb-1 tracking-tight">{r.numero}</div>
+                                                <div className="text-slate-400 leading-tight truncate text-[10px] font-semibold uppercase">{r.caratula}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirm({ ...confirm, open: false })} className="flex-1 py-3 glass-panel rounded-2xl font-bold text-xs uppercase text-slate-300 tracking-widest">Cerrar</button>
+                                <button onClick={confirm.onOk} className={`flex-1 py-3 ${confirm.color} text-white rounded-2xl font-bold text-xs uppercase shadow-lg transition-transform active:scale-95 tracking-widest`}>Continuar</button>
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {alertState.open && (
                     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-rose-500/20 shadow-2xl">
-                            <h3 className="text-xl font-black text-white mb-3 tracking-tighter">{alertState.title}</h3>
-                            <p className="text-slate-400 font-medium mb-8 text-sm">{alertState.msg}</p>
-                            <button onClick={() => setAlertState({ ...alertState, open: false })} className="w-full py-3 bg-rose-600 text-white rounded-2xl font-bold text-xs uppercase tracking-widest">Entendido</button>
-                        </div>
+                        <div className="max-w-md w-full glass-panel rounded-[32px] p-8 text-center border-rose-500/20 shadow-2xl"><h3 className="text-xl font-black text-white mb-3 tracking-tighter uppercase">{alertState.title}</h3><p className="text-slate-400 font-medium mb-8 text-sm leading-snug">{alertState.msg}</p><button onClick={() => setAlertState({ ...alertState, open: false })} className="w-full py-3 bg-rose-600 text-white rounded-2xl font-bold text-xs uppercase tracking-widest">Entendido</button></div>
                     </div>
                 )}
             </div>
@@ -682,17 +658,16 @@
             <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
                 <BackgroundGradientAnimation />
                 <div className="max-w-sm w-full glass-panel rounded-[48px] p-10 border-white/5 shadow-2xl relative z-10 text-center">
-                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-xl shadow-blue-900/40">
+                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-xl">
                          <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11H5m14 0a2 2 0 0 1 12 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" /></svg>
                     </div>
-                    <h2 className="text-3xl font-black text-white tracking-tighter mb-2">CONTROL JEP2</h2>
+                    <h2 className="text-3xl font-black text-white tracking-tighter mb-2 uppercase">Control JEP2</h2>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-[4px] mb-10">Poder Judicial</p>
                     <form onSubmit={handleLogin} className="space-y-4">
-                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email Judicial" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium" required />
-                        <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Contraseña" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium" required />
-                        <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-[2px] text-[10px] hover:bg-blue-500 shadow-xl transition-all disabled:bg-slate-800 tracking-widest">{loading ? 'AUTENTICANDO...' : 'INICIAR SESIÓN'}</button>
+                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email Judicial" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium tracking-tight" required />
+                        <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Contraseña" className="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium tracking-tight" required />
+                        <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-500 shadow-xl transition-all disabled:bg-slate-800">{loading ? 'Conectando...' : 'Iniciar Sesión'}</button>
                     </form>
-                    <p className="mt-10 text-[9px] text-center font-bold text-slate-600 uppercase tracking-widest opacity-50 font-black">© 2025 Catamarca - Poder Judicial</p>
                 </div>
             </div>
         );
